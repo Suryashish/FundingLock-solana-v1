@@ -1,158 +1,146 @@
 {
   "address": "78VTWQn5FdEE3vWvincjDG5cp1J7x3s8ioZzcXEMksxx",
   "metadata": {
-    "name": "contract",
-    "version": "0.1.0",
+    "name": "funding_lock",
+    "version": "1.0.0",
     "spec": "0.1.0",
-    "description": "Created with Anchor"
+    "description": "FundingLock - Perpetual Futures Funding Rate Hedge Protocol"
   },
   "instructions": [
     {
-      "name": "increment",
-      "discriminator": [
-        11,
-        18,
-        104,
-        9,
-        104,
-        174,
-        59,
-        33
-      ],
+      "name": "initialize_market",
+      "discriminator": [35, 35, 22, 168, 204, 137, 36, 177],
       "accounts": [
-        {
-          "name": "counter",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  117,
-                  110,
-                  116,
-                  101,
-                  114
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "authority",
-          "signer": true
-        }
+        { "name": "market_config", "writable": true, "pda": { "seeds": [{ "kind": "const", "value": [109, 97, 114, 107, 101, 116, 95, 99, 111, 110, 102, 105, 103] }, { "kind": "arg", "path": "market_symbol" }] } },
+        { "name": "admin", "writable": true, "signer": true },
+        { "name": "system_program", "address": "11111111111111111111111111111111" }
+      ],
+      "args": [
+        { "name": "venue_id", "type": { "array": ["u8", 16] } },
+        { "name": "market_symbol", "type": { "array": ["u8", 16] } },
+        { "name": "interval_seconds", "type": "u64" },
+        { "name": "min_rate_ppm", "type": "i64" },
+        { "name": "max_rate_ppm", "type": "i64" },
+        { "name": "max_notional_cents", "type": "u64" },
+        { "name": "safety_buffer_bps", "type": "u16" },
+        { "name": "oracle_authority", "type": "pubkey" }
+      ]
+    },
+    {
+      "name": "create_offer",
+      "discriminator": [79, 102, 102, 101, 114, 67, 114, 101],
+      "accounts": [
+        { "name": "contract_account", "writable": true, "pda": { "seeds": [{ "kind": "const", "value": [99, 111, 110, 116, 114, 97, 99, 116] }, { "kind": "arg", "path": "contract_id" }] } },
+        { "name": "market_config", "pda": { "seeds": [{ "kind": "const", "value": [109, 97, 114, 107, 101, 116, 95, 99, 111, 110, 102, 105, 103] }, { "kind": "account", "path": "market_config.market_symbol" }] } },
+        { "name": "buyer", "writable": true, "signer": true },
+        { "name": "system_program", "address": "11111111111111111111111111111111" }
+      ],
+      "args": [
+        { "name": "contract_id", "type": { "array": ["u8", 16] } },
+        { "name": "position_side", "type": "u8" },
+        { "name": "notional_cents", "type": "u64" },
+        { "name": "fixed_rate_ppm", "type": "i64" },
+        { "name": "interval_count", "type": "u16" },
+        { "name": "start_time", "type": "i64" }
+      ]
+    },
+    {
+      "name": "accept_offer",
+      "discriminator": [65, 99, 99, 101, 112, 116, 79, 102],
+      "accounts": [
+        { "name": "contract_account", "writable": true },
+        { "name": "risk_taker", "writable": true, "signer": true }
       ],
       "args": []
     },
     {
-      "name": "initialize",
-      "discriminator": [
-        175,
-        175,
-        109,
-        31,
-        13,
-        152,
-        155,
-        237
-      ],
+      "name": "deposit_collateral",
+      "discriminator": [68, 101, 112, 111, 115, 105, 116, 67],
       "accounts": [
-        {
-          "name": "payer",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "counter",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  117,
-                  110,
-                  116,
-                  101,
-                  114
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
+        { "name": "contract_account", "writable": true },
+        { "name": "vault", "writable": true },
+        { "name": "depositor", "writable": true, "signer": true },
+        { "name": "system_program", "address": "11111111111111111111111111111111" }
+      ],
+      "args": [{ "name": "amount", "type": "u64" }]
+    },
+    {
+      "name": "activate_contract",
+      "discriminator": [65, 99, 116, 105, 118, 97, 116, 101],
+      "accounts": [
+        { "name": "contract_account", "writable": true },
+        { "name": "market_config" },
+        { "name": "authority", "writable": true, "signer": true }
+      ],
+      "args": []
+    },
+    {
+      "name": "record_funding_observation",
+      "discriminator": [82, 101, 99, 111, 114, 100, 79, 98],
+      "accounts": [
+        { "name": "contract_account", "writable": true },
+        { "name": "observation_record", "writable": true },
+        { "name": "market_config" },
+        { "name": "oracle_authority", "writable": true, "signer": true },
+        { "name": "system_program", "address": "11111111111111111111111111111111" }
+      ],
+      "args": [
+        { "name": "interval_index", "type": "u16" },
+        { "name": "realized_rate_ppm", "type": "i64" },
+        { "name": "recorded_at", "type": "i64" }
+      ]
+    },
+    {
+      "name": "finalize_contract",
+      "discriminator": [70, 105, 110, 97, 108, 105, 122, 101],
+      "accounts": [
+        { "name": "contract_account", "writable": true },
+        { "name": "vault", "writable": true },
+        { "name": "buyer", "writable": true },
+        { "name": "risk_taker", "writable": true },
+        { "name": "caller", "writable": true, "signer": true },
+        { "name": "system_program", "address": "11111111111111111111111111111111" }
+      ],
+      "args": []
+    },
+    {
+      "name": "cancel_unmatched_offer",
+      "discriminator": [67, 97, 110, 99, 101, 108, 79, 102],
+      "accounts": [
+        { "name": "contract_account", "writable": true },
+        { "name": "vault", "writable": true },
+        { "name": "buyer", "writable": true, "signer": true },
+        { "name": "system_program", "address": "11111111111111111111111111111111" }
       ],
       "args": []
     }
   ],
   "accounts": [
     {
-      "name": "Counter",
-      "discriminator": [
-        255,
-        176,
-        4,
-        245,
-        188,
-        253,
-        124,
-        25
-      ]
+      "name": "MarketConfig",
+      "discriminator": [118, 12, 234, 49, 138, 92, 19, 240]
+    },
+    {
+      "name": "ContractAccount",
+      "discriminator": [214, 18, 203, 76, 12, 198, 45, 111]
+    },
+    {
+      "name": "ObservationRecord",
+      "discriminator": [140, 24, 88, 11, 230, 99, 17, 34]
     }
   ],
   "errors": [
-    {
-      "code": 6000,
-      "name": "Unauthorized",
-      "msg": "Only the counter authority can update this counter"
-    },
-    {
-      "code": 6001,
-      "name": "CounterOverflow",
-      "msg": "Counter has reached the maximum value"
-    }
-  ],
-  "types": [
-    {
-      "name": "Counter",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "count",
-            "type": "u64"
-          },
-          {
-            "name": "authority",
-            "type": "pubkey"
-          }
-        ]
-      }
-    }
-  ],
-  "constants": [
-    {
-      "name": "COUNTER_SEED",
-      "type": "bytes",
-      "value": "[99, 111, 117, 110, 116, 101, 114]"
-    },
-    {
-      "name": "HELLO_WORLD_LAMPORTS",
-      "type": "u64",
-      "value": "1"
-    },
-    {
-      "name": "MAX_COUNT",
-      "type": "u64",
-      "value": "10"
-    }
+    { "code": 6000, "name": "Unauthorized", "msg": "Unauthorized: Signer does not have permission for this operation" },
+    { "code": 6001, "name": "MarketPaused", "msg": "Market is paused by protocol authority" },
+    { "code": 6002, "name": "InvalidState", "msg": "Invalid lifecycle state for this instruction" },
+    { "code": 6003, "name": "ShortPositionNotSupportedOnChain", "msg": "Short-position hedges are currently supported in simulator only" },
+    { "code": 6004, "name": "InsufficientCollateral", "msg": "Deposit amount is less than required collateral" },
+    { "code": 6005, "name": "InvalidObservationSequence", "msg": "Observation interval index out of sequence" },
+    { "code": 6006, "name": "RateOutOfBounds", "msg": "Realized funding rate is outside configured safety bounds" },
+    { "code": 6007, "name": "ObservationsIncomplete", "msg": "Contract has not completed all expected funding intervals" },
+    { "code": 6008, "name": "AlreadySettled", "msg": "Contract is already finalized" },
+    { "code": 6009, "name": "MathOverflow", "msg": "Math overflow occurred during settlement calculation" },
+    { "code": 6010, "name": "InsufficientVaultBalance", "msg": "Vault balance is insufficient for settlement payout" },
+    { "code": 6011, "name": "InvalidMarketConfig", "msg": "Invalid market or symbol configuration" }
   ]
 }

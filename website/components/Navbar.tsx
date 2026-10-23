@@ -1,21 +1,29 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useSyncExternalStore } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { LAMPORTS_PER_SOL } from "@solana/web3.js";
-import { PROGRAM_ID } from "@/lib/contract";
-import { Shield, ExternalLink, Activity, Coins } from "lucide-react";
+import { PROGRAM_ID } from "../lib/solana/client.ts";
+import { ExternalLink, Layers, Copy, Check } from "lucide-react";
 
-export const Navbar = () => {
+export type NavTab = "simulator" | "historical" | "marketplace" | "replay" | "overview";
+
+interface NavbarProps {
+  activeTab: NavTab;
+  onSelectTab: (tab: NavTab) => void;
+}
+
+const emptySubscribe = () => () => {};
+
+export const Navbar: React.FC<NavbarProps> = ({ activeTab, onSelectTab }) => {
   const { connected, publicKey } = useWallet();
   const { connection } = useConnection();
   const [balance, setBalance] = useState<number | null>(null);
-  const [mounted, setMounted] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  // Official React 19 pattern for client mount check
+  const mounted = useSyncExternalStore(emptySubscribe, () => true, () => false);
 
   useEffect(() => {
     let isSubscribed = true;
@@ -30,8 +38,8 @@ export const Navbar = () => {
         if (isSubscribed) {
           setBalance(Number(bal) / Number(LAMPORTS_PER_SOL));
         }
-      } catch (e) {
-        console.error("Failed to fetch balance", e);
+      } catch {
+        // Silently handle RPC throttle/offline on testnet
       }
     }
 
@@ -44,64 +52,132 @@ export const Navbar = () => {
     };
   }, [connected, publicKey, connection]);
 
+  const copyAddress = () => {
+    if (publicKey) {
+      navigator.clipboard.writeText(publicKey.toBase58());
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
+  };
+
+  const navItems: { id: NavTab; label: string }[] = [
+    { id: "simulator", label: "Hedge Simulator" },
+    { id: "historical", label: "Historical Rates" },
+    { id: "marketplace", label: "Marketplace" },
+    { id: "replay", label: "Replay Demo" },
+    { id: "overview", label: "Protocol Overview" },
+  ];
+
   return (
-    <header className="border-b border-zinc-800/80 bg-zinc-950/70 backdrop-blur-md sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        {/* Brand */}
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-emerald-500 via-teal-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-            <Shield className="w-5 h-5 text-zinc-950 stroke-[2.5]" />
-          </div>
-          <div>
+    <header className="border-b border-zinc-800 bg-zinc-950 sticky top-0 z-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between gap-4">
+        {/* Brand Logo & Protocol Title */}
+        <div className="flex items-center gap-6">
+          <div
+            className="flex items-center gap-2.5 cursor-pointer select-none group"
+            onClick={() => onSelectTab("simulator")}
+          >
+            <div className="h-8 w-8 rounded-lg bg-zinc-900 border border-zinc-700/80 flex items-center justify-center group-hover:border-zinc-500 transition">
+              <Layers className="w-4 h-4 text-zinc-100" />
+            </div>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-lg tracking-tight text-white">
+              <span className="font-bold text-sm tracking-tight text-white">
                 FundingLock
               </span>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
-                Testnet
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 font-mono text-zinc-400">
+                v1.0
               </span>
             </div>
-            <p className="text-xs text-zinc-400 hidden sm:block">
-              Perpetual Funding Rate Hedge Protocol
-            </p>
           </div>
+
+          {/* Desktop Navigation Tabs */}
+          <nav className="hidden md:flex items-center gap-1">
+            {navItems.map((item) => {
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => onSelectTab(item.id)}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                    isActive
+                      ? "bg-zinc-900 text-white font-semibold border border-zinc-800"
+                      : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </nav>
         </div>
 
-        {/* Right Info + Wallet */}
-        <div className="flex items-center gap-3">
-          {/* Network indicator */}
-          <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-300">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Solana Testnet</span>
+        {/* Right Section: Status Pills + Wallet */}
+        <div className="flex items-center gap-2.5">
+          {/* Solana Testnet Pill */}
+          <div className="hidden lg:flex items-center gap-2 px-2.5 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-xs font-mono text-zinc-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-zinc-100 animate-pulse" />
+            <span className="text-[11px]">Testnet</span>
           </div>
 
-          {/* Connected Balance */}
-          {mounted && connected && balance !== null && (
-            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900/80 border border-zinc-800 text-xs font-mono text-zinc-200">
-              <Coins className="w-3.5 h-3.5 text-amber-400" />
-              <span>{balance.toFixed(3)} SOL</span>
+          {/* Connected Wallet Balance */}
+          {mounted && connected && publicKey && balance !== null && (
+            <div
+              onClick={copyAddress}
+              title="Click to copy public key"
+              className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-md bg-zinc-900/80 hover:bg-zinc-900 border border-zinc-800 text-xs font-mono text-zinc-300 cursor-pointer transition"
+            >
+              <span className="font-semibold text-zinc-100">{balance.toFixed(2)} SOL</span>
+              <span className="text-zinc-500">|</span>
+              <span className="text-zinc-400 text-[11px] truncate max-w-[80px]">
+                {publicKey.toBase58().slice(0, 4)}...{publicKey.toBase58().slice(-4)}
+              </span>
+              {copied ? (
+                <Check className="w-3 h-3 text-zinc-200" />
+              ) : (
+                <Copy className="w-3 h-3 text-zinc-500" />
+              )}
             </div>
           )}
 
-          {/* Program Explorer Link */}
+          {/* Explorer Link */}
           <a
             href={`https://explorer.solana.com/address/${PROGRAM_ID.toBase58()}?cluster=testnet`}
             target="_blank"
             rel="noopener noreferrer"
-            className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900/60 hover:bg-zinc-800/80 border border-zinc-800 text-xs text-zinc-400 hover:text-zinc-200 transition"
-            title="View Contract on Solana Explorer"
+            className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-[11px] font-mono text-zinc-400 hover:text-zinc-200 transition"
+            title="View Solana Escrow Program"
           >
             <span>Contract</span>
-            <ExternalLink className="w-3 h-3" />
+            <ExternalLink className="w-3 h-3 text-zinc-500" />
           </a>
 
-          {/* Wallet Multi Button */}
+          {/* Monochromatic Wallet Button */}
           {mounted && (
-            <div className="wallet-btn-container">
-              <WalletMultiButton className="!bg-gradient-to-r !from-emerald-500 !to-teal-500 hover:!from-emerald-400 hover:!to-teal-400 !text-zinc-950 !font-semibold !text-sm !h-10 !px-4 !rounded-xl !transition !shadow-md !shadow-emerald-500/15" />
+            <div>
+              <WalletMultiButton />
             </div>
           )}
         </div>
+      </div>
+
+      {/* Mobile Navigation Tabs */}
+      <div className="md:hidden flex items-center justify-around border-t border-zinc-800/80 bg-zinc-950 px-2 py-1.5 overflow-x-auto text-xs font-mono">
+        {navItems.map((item) => {
+          const isActive = activeTab === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => onSelectTab(item.id)}
+              className={`px-2.5 py-1 rounded text-xs whitespace-nowrap transition ${
+                isActive
+                  ? "bg-zinc-800 text-white font-semibold border border-zinc-700"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              {item.label}
+            </button>
+          );
+        })}
       </div>
     </header>
   );
