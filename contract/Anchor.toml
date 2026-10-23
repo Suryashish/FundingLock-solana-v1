@@ -9,6 +9,12 @@ skip-lint = false
 [programs.localnet]
 contract = "78VTWQn5FdEE3vWvincjDG5cp1J7x3s8ioZzcXEMksxx"
 
+[programs.devnet]
+contract = "78VTWQn5FdEE3vWvincjDG5cp1J7x3s8ioZzcXEMksxx"
+
+[programs.testnet]
+contract = "78VTWQn5FdEE3vWvincjDG5cp1J7x3s8ioZzcXEMksxx"
+
 [provider]
 cluster = "localnet"
 wallet = "~/.config/solana/id.json"
