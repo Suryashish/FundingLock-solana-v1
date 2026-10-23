@@ -19,7 +19,6 @@ import {
   Sun,
   Moon,
   SlidersHorizontal,
-  ShieldCheck,
   Clock,
   Wallet,
   LogOut,
@@ -218,10 +217,15 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {/* Right: Network Status, Account Capsule, Activity Drawer & Theme Toggle */}
             <div className="flex items-center gap-2 sm:gap-2.5">
-              {/* Network Pill Badge */}
-              <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-100/80 dark:bg-zinc-900/80 border border-black/[0.04] dark:border-white/[0.06] text-[11px] font-mono text-zinc-600 dark:text-zinc-400">
+              {/* SOL-PERP Live Rate Pill (Streamlined into header) */}
+              <div className="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-full bg-zinc-100/90 dark:bg-zinc-900/90 border border-black/[0.04] dark:border-white/[0.06] text-xs font-mono">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span>Testnet</span>
+                <span className="font-bold text-zinc-950 dark:text-white">SOL-PERP</span>
+                <span className="text-zinc-600 dark:text-zinc-300">$184.20</span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">+0.0200%</span>
+                <span className="text-zinc-300 dark:text-zinc-700">|</span>
+                <Clock className="w-3 h-3 text-zinc-400" />
+                <span className="text-zinc-500 text-[11px]">{countdown}</span>
               </div>
 
               {/* Monochromatic Account Capsule (Exact Image 2 Style - No Purple Button!) */}
@@ -365,57 +369,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
               );
             })}
-          </div>
-        </div>
-
-        {/* Integrated Sub-Header Market Ticker Strip (Sleek porcelain/obsidian styling) */}
-        <div className="border-t border-black/[0.04] dark:border-white/[0.06] bg-zinc-50/70 dark:bg-zinc-900/50 px-4 sm:px-6 lg:px-8 py-2 text-xs font-mono">
-          <div className="max-w-7xl mx-auto flex items-center justify-between gap-4 overflow-x-auto no-scrollbar whitespace-nowrap">
-            {/* Left: Active Perp Market & Real-time Quotes */}
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 px-2.5 py-0.8 rounded-full bg-white dark:bg-zinc-800 border border-black/[0.06] dark:border-white/[0.08] font-bold text-zinc-900 dark:text-white shadow-xs">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span>SOL-PERP</span>
-              </div>
-
-              <div className="flex items-baseline gap-1 text-[11px]">
-                <span className="text-zinc-400">MARK:</span>
-                <span className="text-zinc-800 dark:text-zinc-200 font-semibold">$184.20</span>
-              </div>
-
-              <div className="hidden sm:flex items-baseline gap-1 text-[11px]">
-                <span className="text-zinc-400">INDEX:</span>
-                <span className="text-zinc-500 dark:text-zinc-400">$184.15</span>
-              </div>
-            </div>
-
-            {/* Center: Funding Rate & Next 8h Epoch Countdown */}
-            <div className="flex items-center gap-4 text-[11px]">
-              <div className="flex items-center gap-1.5">
-                <span className="text-zinc-400">8H RATE:</span>
-                <span className="text-zinc-900 dark:text-white font-bold">+0.0200%</span>
-                <span className="text-zinc-500 text-[10px]">(+21.9% APR)</span>
-              </div>
-
-              <div className="flex items-center gap-1.5 text-zinc-700 dark:text-zinc-300">
-                <Clock className="w-3.5 h-3.5 text-zinc-400" />
-                <span className="text-zinc-400">NEXT EPOCH:</span>
-                <span className="font-bold text-zinc-900 dark:text-white">{countdown}</span>
-              </div>
-            </div>
-
-            {/* Right: Venue & Solvency Guarantee */}
-            <div className="hidden md:flex items-center gap-3.5 text-[11px]">
-              <div className="flex items-center gap-1">
-                <span className="text-zinc-400">VENUE:</span>
-                <span className="text-zinc-700 dark:text-zinc-300 font-medium">Binance Futures</span>
-              </div>
-
-              <div className="flex items-center gap-1 text-zinc-700 dark:text-zinc-300">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                <span>100% Solvency Vault</span>
-              </div>
-            </div>
           </div>
         </div>
       </header>
