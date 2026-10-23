@@ -9,7 +9,7 @@
 
 FundingLock is a funding-rate hedge marketplace for perpetual-futures traders.
 
-A trader who already has a SOL perpetual position can use FundingLock to agree on a fixed funding rate for a specific time period. Another participant accepts the opposite side of the agreement. At each funding interval, the contract compares the agreed fixed rate with the realized funding rate and records the difference as a payment between the two participants.
+A trader who already has a SOL perpetual position can use FundingLock to agree on a fixed funding rate for a specific time period. Another participant accepts the opposite side of the agreement. At each funding interval, the contract compares the agreed fixed rate with the realized funding rate and records the signed difference. In the MVP, collateral is not transferred until the contract is finalized at maturity, when the accumulated intervals are settled as one net payment.
 
 FundingLock does **not** open, close, or manage the trader's perpetual position. The trader still pays or receives funding on the exchange where the perp position exists. FundingLock is a separate collateralized contract intended to offset changes in that funding cost.
 
@@ -19,7 +19,7 @@ FundingLock is like buying a price guarantee for a recurring bill:
 
 - The protection buyer wants predictable funding costs.
 - The risk taker accepts changing funding rates in exchange for possible profit.
-- FundingLock records the agreement, holds collateral, receives funding-rate observations, calculates the difference, and pays the correct participant.
+- FundingLock records the agreement, holds collateral, receives funding-rate observations, calculates each interval's difference, and pays the correct participant once at finalization.
 
 The first version should be a safe, understandable testnet prototype rather than a production derivatives protocol.
 
@@ -171,6 +171,24 @@ Interpretation:
 - The actual perp funding paid or received at the venue is separate from this contract settlement.
 - `actual_funding_cost - total_settlement` should approximate the fixed funding cost, subject to fees, collateral limits, rounding, oracle rules, and default risk.
 - The hedge assumes the notional remains fixed. If the trader changes the underlying position size, the hedge no longer perfectly matches the trader's actual funding exposure.
+
+### Settlement timing and payment model
+
+For the MVP, settlement has two separate steps:
+
+1. **Record:** After each valid funding observation, the program calculates that interval's signed settlement and adds it to the contract's accumulated net settlement. This updates accounting only; it does not transfer tokens.
+2. **Pay:** After every required interval has been recorded and the contract reaches maturity, the program finalizes the contract and transfers the single net accumulated amount to the entitled participant.
+
+Both parties' collateral remains locked until finalization, subject to the documented unmatched-offer cancellation, pause, missing-observation, and default rules. The MVP does not make token transfers after every interval and does not pay both sides separately at maturity. It nets all interval results into one final payment.
+
+At finalization:
+
+- if the accumulated net settlement is positive, the program pays the protection buyer from the risk taker's locked collateral and returns each party's remaining collateral to its owner;
+- if the accumulated net settlement is negative, the program pays the risk taker from the protection buyer's locked collateral and returns each party's remaining collateral to its owner;
+- if the accumulated amount is zero, the program returns both collateral balances without a settlement transfer;
+- the program never transfers more than the available vault balance and records any unpaid shortfall under the documented default rule.
+
+For the MVP, an unmatched offer may be cancelled and its deposited collateral returned before activation. A paused contract cannot record new observations or finalize until the configured authority resolves the pause. A missing observation blocks finalization rather than being treated as zero.
 
 Example for the demo:
 
@@ -357,14 +375,14 @@ The state transitions must be enforced by the program. The UI must derive its la
 4. `accept_offer`
 5. `deposit_collateral`
 6. `activate_contract`
-7. `publish_funding_observation`
-8. `settle_interval` or `record_interval`
+7. `record_funding_observation`
+8. `record_interval_settlement`
 9. `finalize_contract`
 10. `withdraw_collateral`
 11. `cancel_unmatched_offer`
 12. `pause_market` / `unpause_market` for the configured authority
 
-The first on-chain contract should support one market, one collateral mint, fixed notional, a short fixed duration, and long-position hedges only. The account schema may include a position-side enum so short hedges can be added after the direction-aware simulator and tests are proven. The first demo may combine some instructions if doing so makes the program easier to audit and explain, but each authorization and state transition must remain explicit.
+`record_funding_observation` and `record_interval_settlement` update on-chain accounting only. They must not transfer collateral. `finalize_contract` is the only normal instruction that transfers the net settlement and releases remaining collateral after all required intervals are recorded. The first on-chain contract should support one market, one collateral mint, fixed notional, a short fixed duration, and long-position hedges only. The account schema may include a position-side enum so short hedges can be added after the direction-aware simulator and tests are proven. The first demo may combine observation recording and interval accounting if doing so makes the program easier to audit and explain, but each authorization and state transition must remain explicit.
 
 ### 6.6 Oracle and funding data
 
@@ -373,9 +391,10 @@ Solana cannot discover an external exchange's funding rate by itself. The MVP mu
 #### MVP oracle approach
 
 - Use one authorized publisher key on a Solana test network. The publisher signing key must remain in the separate script/service and must never be exposed through the browser bundle.
-- Generate observations from a checked-in historical fixture or a deterministic replay script.
-- Include the market, venue identifier, interval start, interval end, signed rate, timestamp, sequence number, and publisher signature in each observation.
+- Generate observations from verified historical observations for the selected venue, or from clearly labeled deterministic fixtures for the testnet demo. Never present invented fixture values as real historical data.
+- Include the market, venue identifier, interval start, interval end, signed rate, timestamp, and sequence number in each observation.
 - Normalize the selected venue's raw data before publishing it, with the normalization rule documented and versioned.
+- The publisher submits observations in transactions signed by the authorized publisher key. The program authenticates the publisher through the transaction signer; the MVP does not add a second application-level signature-verification scheme or support relayers.
 - Allow only one valid observation per market and interval.
 - Reject observations outside the contract's allowed time window.
 - Reject duplicate or out-of-order sequence numbers.
@@ -394,6 +413,8 @@ Before mainnet use, define and implement a stronger design, such as multiple ind
 - how corrections and disputes work;
 - who can pause settlement;
 - how oracle compromise is contained.
+
+The MVP explicitly trusts one authorized publisher. This is a centralized testnet assumption, not a decentralized oracle design.
 
 ### 6.7 Matching mechanism
 
@@ -441,7 +462,7 @@ max_buyer_payout = sum(max(0, settlement_i(min_rate_i), settlement_i(max_rate_i)
 max_buyer_payment = sum(max(0, -settlement_i(min_rate_i), -settlement_i(max_rate_i)))
 ```
 
-For a constant-rate MVP, this can be simplified using the interval count. The exact rate bounds, maximum duration, maximum notional, payout cap, safety buffer, and minimum collateral ratio must be stored in the market configuration or contract terms.
+These maximums are calculated across **all permitted intervals** and the configured minimum and maximum rate bounds. Every interval uses the same signed-rate convention and the same direction-aware formula. For a constant-rate MVP, the calculation can be simplified using the interval count. The exact rate bounds, maximum duration, maximum notional, payout cap, safety buffer, and minimum collateral ratio must be stored in the market configuration or contract terms.
 
 Recommended MVP behavior:
 
@@ -450,7 +471,9 @@ Recommended MVP behavior:
 - keep collateral in a program-controlled token vault;
 - prevent activation if either side is underfunded;
 - cap every submitted rate and every aggregate payout;
-- with correct bounds, activation should make the permitted settlement fully collateralized; if a payout nevertheless exceeds available collateral because of a program error or explicitly simulated default, mark the contract `Defaulted`, pay only according to the documented priority/pro-rata rule, and expose the shortfall;
+- record each interval's settlement without transferring collateral;
+- at maturity, transfer only the net accumulated amount that the program can actually pay from the locked vault;
+- with correct bounds, activation should make the permitted net settlement fully collateralized; if a payout nevertheless exceeds available collateral because of a program error or explicitly simulated default, mark the contract `Defaulted`, pay only according to the documented priority/pro-rata rule, and expose the shortfall;
 - never allow the UI to display an unpaid amount as if it were fully paid.
 
 For the demo, the default rule can be simple and deterministic, such as distributing available collateral to the entitled party and recording the unpaid remainder. It must be clearly labeled as a prototype rule, not a complete production credit model.
@@ -554,9 +577,9 @@ The implementation is intentionally limited to six phases. Each phase produces s
 
 ### Phase 1 — Funding engine and simulator
 
-Start here. This is the first milestone and does not require a wallet, Solana RPC, or live market data.
+Start here. This is the first milestone and does not require a wallet, Solana RPC, or live market data, but it has one blocking prerequisite: **select the perpetuals venue before implementing the funding engine**.
 
-Before writing the calculation code, select and document one perpetuals venue and its actual funding convention. Record the venue identifier, market symbol, interval length, interval boundaries, timestamp semantics, rate units, and normalization rule.
+Record the selected venue identifier, market symbol, interval length, interval boundaries, timestamp semantics, rate units, historical-data source, and normalization rule. Do not build a supposedly real historical dashboard from invented values. Use verified historical observations, or use deterministic fixtures that are visibly labeled as simulated/demo data.
 
 Build:
 
@@ -616,8 +639,8 @@ Implement only the instructions required for this lifecycle:
 - create and accept a hedge;
 - deposit collateral;
 - activate the contract after both sides meet the maximum-bound collateral requirement;
-- record validated funding observations;
-- settle and withdraw collateral.
+- record validated funding observations and interval settlements without token transfers;
+- finalize the contract with one net settlement transfer and release remaining collateral.
 
 The contract schema should include a position-side enum for future short support, but the initial on-chain instruction must reject `short` until the long-only path is verified.
 
@@ -648,11 +671,12 @@ Build a separate trusted publisher script or service. Its signing key must never
 
 Build:
 
-- one venue-specific historical fixture or replay input;
+- one venue-specific verified historical dataset or clearly labeled deterministic replay input;
 - raw-data normalization into the shared observation schema;
-- publisher validation for market, venue, timestamps, sequence numbers, rate bounds, and signatures;
+- on-chain validation of the authorized transaction signer, market, venue, timestamps, sequence numbers, and rate bounds;
 - one-observation-per-interval enforcement;
-- interval settlement and finalization;
+- interval accounting with no token transfer;
+- net settlement and collateral release only at finalization;
 - explicit missing-data, late-data, paused-state, and invalid-data behavior;
 - an off-chain/on-chain reconciliation command.
 
@@ -720,6 +744,12 @@ Test:
 - wrong interval or duplicate interval;
 - out-of-range rates;
 - rejected short-position contract while the first on-chain version is long-only;
+- interval recording changes accounting without transferring collateral;
+- finalization nets all recorded intervals into one settlement transfer;
+- finalization returns remaining collateral to both parties;
+- finalization cannot transfer more than the vault can pay;
+- missing observations block finalization;
+- paused contracts block observation recording and finalization;
 - premature finalization;
 - double finalization;
 - withdrawal limits;
