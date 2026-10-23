@@ -9,6 +9,7 @@ import { PublicKey, TransactionInstruction, SystemProgram } from '@solana/web3.j
 import type { ContractStatus } from '../domain/types.ts';
 
 export const PROGRAM_ID = new PublicKey('78VTWQn5FdEE3vWvincjDG5cp1J7x3s8ioZzcXEMksxx');
+export const TESTNET_ORACLE_PUBKEY = new PublicKey('A5oiFqG3hn39WSCGvCvSCbkWQJ8kzjNQM135WXnowv3E');
 
 export const SEEDS = {
   MARKET_CONFIG: Buffer.from('market_config'),

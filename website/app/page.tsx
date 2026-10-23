@@ -1,9 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { Navbar, NavTab } from "../components/Navbar.tsx";
-import { MarketTickerBar } from "../components/MarketTickerBar.tsx";
 import { LandingOverview } from "../components/LandingOverview.tsx";
 import { HistoricalDashboard } from "../components/HistoricalDashboard.tsx";
 import { HedgeSimulator } from "../components/HedgeSimulator.tsx";
@@ -23,6 +22,16 @@ const WalletContextProvider = dynamic(
 export default function Home() {
   const [activeTab, setActiveTab] = useState<NavTab>("simulator");
   const [customObservations, setCustomObservations] = useState<FundingObservation[] | null>(null);
+  const [isDark, setIsDark] = useState<boolean>(false);
+
+  // Sync theme with document element
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  }, [isDark]);
 
   const handleSimulateHistorical = (observations: FundingObservation[]) => {
     setCustomObservations(observations);
@@ -35,8 +44,8 @@ export default function Home() {
 
   return (
     <WalletContextProvider>
-      <div className="min-h-screen flex flex-col bg-zinc-950 text-zinc-100 font-sans selection:bg-zinc-800 selection:text-white">
-        {/* Main Protocol Header */}
+      <div className="min-h-screen flex flex-col font-sans transition-colors duration-200">
+        {/* Luxury Header Bar with Integrated Ticker */}
         <Navbar
           activeTab={activeTab}
           onSelectTab={(tab) => {
@@ -45,10 +54,9 @@ export default function Home() {
             }
             setActiveTab(tab);
           }}
+          isDark={isDark}
+          onToggleTheme={() => setIsDark(!isDark)}
         />
-
-        {/* Perp Market Live Ticker Sub-bar */}
-        <MarketTickerBar />
 
         {/* Main Content Viewport */}
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10">
@@ -73,26 +81,26 @@ export default function Home() {
           )}
         </main>
 
-        {/* Institutional Monochromatic Footer */}
-        <footer className="border-t border-zinc-900 bg-zinc-950/80 py-5 text-xs text-zinc-500 font-mono">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px]">
-            <div className="flex items-center gap-2 text-zinc-400">
-              <span className="w-1.5 h-1.5 rounded-full bg-zinc-300" />
-              <span>FundingLock Protocol v1.0 • Decentralized Funding Risk Escrow</span>
+        {/* Institutional Minimalist Monochromatic Footer */}
+        <footer className="border-t border-black/[0.05] dark:border-white/[0.08] py-6 text-xs text-zinc-500 font-mono">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px]">
+            <div className="flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span>FundingLock Protocol v1.0 • Decentralized Funding Rate Risk Offset</span>
             </div>
-            <div className="flex items-center gap-4 text-zinc-400">
+            <div className="flex items-center gap-4 text-zinc-500 dark:text-zinc-400">
               <a
                 href={`https://explorer.solana.com/address/${PROGRAM_ID.toBase58()}?cluster=testnet`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hover:text-zinc-200 transition"
+                className="hover:text-zinc-950 dark:hover:text-white transition"
               >
-                Explorer Contract
+                Solana Contract
               </a>
               <span>•</span>
-              <span>Binance SOL-PERP Normalizer</span>
+              <span>Binance SOL-PERP</span>
               <span>•</span>
-              <span className="text-zinc-500">Testnet Prototype</span>
+              <span>Testnet Prototype</span>
             </div>
           </div>
         </footer>
