@@ -33,10 +33,11 @@ import {
 
 export const ContractDashboard = () => {
   const { connection } = useConnection();
-  const { publicKey, sendTransaction, connected } = useWallet();
+  const { publicKey, sendTransaction, signTransaction, connected } = useWallet();
 
   const [counterPda, setCounterPda] = useState<string>("");
   const [contractState, setContractState] = useState<CounterState | null>(null);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [txSignature, setTxSignature] = useState<string | null>(null);
@@ -47,9 +48,8 @@ export const ContractDashboard = () => {
   // Derive PDA on mount
   useEffect(() => {
     try {
-      getCounterPda().then(([pda]) => {
-        setCounterPda(pda.toBase58());
-      });
+      const [pda] = getCounterPda();
+      setCounterPda(pda.toBase58());
     } catch (e) {
       console.error("PDA derivation error", e);
     }
@@ -78,6 +78,63 @@ export const ContractDashboard = () => {
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
+  // Track connected user wallet balance
+  useEffect(() => {
+    let isSubscribed = true;
+    if (!publicKey || !connected) {
+      setWalletBalance(null);
+      return;
+    }
+    const updateBal = async () => {
+      try {
+        const bal = await connection.getBalance(publicKey, "confirmed");
+        if (isSubscribed) {
+          setWalletBalance(bal / LAMPORTS_PER_SOL);
+        }
+      } catch (e) {
+        console.error("Failed to fetch wallet balance:", e);
+      }
+    };
+    updateBal();
+    const id = setInterval(updateBal, 5000);
+    return () => {
+      isSubscribed = false;
+      clearInterval(id);
+    };
+  }, [publicKey, connected, connection]);
+
+  // Robust transaction dispatcher: prefers wallet.signTransaction + direct RPC broadcast with skipPreflight
+  const sendTx = async (tx: Transaction): Promise<string> => {
+    if (!publicKey) throw new Error("Wallet not connected");
+
+    const { blockhash, lastValidBlockHeight } =
+      await connection.getLatestBlockhash("confirmed");
+    tx.recentBlockhash = blockhash;
+    tx.feePayer = publicKey;
+
+    let signature: string;
+
+    if (signTransaction) {
+      const signed = await signTransaction(tx);
+      signature = await connection.sendRawTransaction(signed.serialize(), {
+        skipPreflight: true,
+        preflightCommitment: "confirmed",
+      });
+    } else {
+      signature = await sendTransaction(tx, connection, {
+        skipPreflight: true,
+        preflightCommitment: "confirmed",
+      });
+    }
+
+    await connection.confirmTransaction(
+      { signature, blockhash, lastValidBlockHeight },
+      "confirmed"
+    );
+
+    return signature;
+  };
+
   // Execute Initialize instruction
   const handleInitialize = async () => {
     if (!publicKey || !connected) {
@@ -90,25 +147,12 @@ export const ContractDashboard = () => {
     setActionLoading("initialize");
 
     try {
-      const [pda] = await getCounterPda();
+      const [pda] = getCounterPda();
       const ix = createInitializeInstruction(publicKey, pda);
       const tx = new Transaction().add(ix);
 
-      const { blockhash, lastValidBlockHeight } =
-        await connection.getLatestBlockhash("confirmed");
-      tx.recentBlockhash = blockhash;
-      tx.feePayer = publicKey;
-
-      const signature = await sendTransaction(tx, connection, {
-        preflightCommitment: "confirmed",
-      });
-
+      const signature = await sendTx(tx);
       setTxSignature(signature);
-
-      await connection.confirmTransaction(
-        { signature, blockhash, lastValidBlockHeight },
-        "confirmed"
-      );
 
       setSuccessMessage(
         "Counter successfully initialized on Solana Testnet! Authority set to your wallet."
@@ -119,6 +163,8 @@ export const ContractDashboard = () => {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("already in use")) {
         setErrorMessage("Account is already initialized on-chain.");
+      } else if (msg.includes("User rejected")) {
+        setErrorMessage("Transaction was cancelled in wallet.");
       } else {
         setErrorMessage(msg);
       }
@@ -139,25 +185,12 @@ export const ContractDashboard = () => {
     setActionLoading("increment");
 
     try {
-      const [pda] = await getCounterPda();
+      const [pda] = getCounterPda();
       const ix = createIncrementInstruction(publicKey, pda);
       const tx = new Transaction().add(ix);
 
-      const { blockhash, lastValidBlockHeight } =
-        await connection.getLatestBlockhash("confirmed");
-      tx.recentBlockhash = blockhash;
-      tx.feePayer = publicKey;
-
-      const signature = await sendTransaction(tx, connection, {
-        preflightCommitment: "confirmed",
-      });
-
+      const signature = await sendTx(tx);
       setTxSignature(signature);
-
-      await connection.confirmTransaction(
-        { signature, blockhash, lastValidBlockHeight },
-        "confirmed"
-      );
 
       setSuccessMessage("Counter incremented by 1 successfully!");
       await loadState();
@@ -172,6 +205,8 @@ export const ContractDashboard = () => {
         setErrorMessage(
           "Counter Overflow: The counter has reached its maximum limit (10)."
         );
+      } else if (msg.includes("User rejected")) {
+        setErrorMessage("Transaction was cancelled in wallet.");
       } else {
         setErrorMessage(msg);
       }
@@ -258,6 +293,42 @@ export const ContractDashboard = () => {
           <div className="space-y-1 text-sm">
             <p className="font-semibold text-rose-300">Transaction Failed</p>
             <p className="text-xs text-rose-300/80 break-all">{errorMessage}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Connected Network & Balance Guide */}
+      {connected && (
+        <div className="rounded-xl bg-zinc-900/90 border border-zinc-800 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3 text-xs">
+            <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
+            <div className="space-y-0.5">
+              <p className="text-zinc-200">
+                Connected: <span className="font-mono text-white">{publicKey?.toBase58()}</span>
+              </p>
+              <p className="text-zinc-400">
+                Testnet Balance:{" "}
+                <span
+                  className={`font-semibold font-mono ${
+                    walletBalance && walletBalance > 0
+                      ? "text-emerald-400"
+                      : "text-amber-400"
+                  }`}
+                >
+                  {walletBalance !== null
+                    ? `${walletBalance.toFixed(4)} SOL`
+                    : "Fetching..."}
+                </span>
+                {walletBalance === 0 && (
+                  <span className="text-rose-400 font-medium ml-2">
+                    ⚠️ 0 SOL detected! Please ensure you switch Phantom to the funded account.
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+          <div className="text-[11px] font-mono px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0 self-start sm:self-auto">
+            Solana Testnet
           </div>
         </div>
       )}

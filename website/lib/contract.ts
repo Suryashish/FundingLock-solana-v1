@@ -14,20 +14,17 @@ export const PROGRAM_ID = new PublicKey(
   "78VTWQn5FdEE3vWvincjDG5cp1J7x3s8ioZzcXEMksxx"
 );
 
-// Constant PDA for seed b"counter"
-export const COUNTER_PDA = new PublicKey(
-  "BjwFNxBcsGUSaDS21TynKf3JGoGV82nBsCPh8n9G684y"
-);
-export const COUNTER_BUMP = 255;
-
 export const TESTNET_RPC_URL =
   process.env.NEXT_PUBLIC_SOLANA_RPC || "https://api.testnet.solana.com";
 
 export const COUNTER_SEED = Buffer.from("counter");
 
-export async function getCounterPda(): Promise<[PublicKey, number]> {
-  return await PublicKey.findProgramAddress([COUNTER_SEED], PROGRAM_ID);
+export function getCounterPda(): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([COUNTER_SEED], PROGRAM_ID);
 }
+
+// Constant PDA for seed b"counter"
+export const [COUNTER_PDA, COUNTER_BUMP] = getCounterPda();
 
 // Discriminators from IDL
 export const INITIALIZE_DISCRIMINATOR = Buffer.from([
@@ -101,4 +98,3 @@ export async function fetchCounterState(
     isInitialized: true,
   };
 }
-
