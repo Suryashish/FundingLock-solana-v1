@@ -51,6 +51,23 @@ The first version should be a safe, understandable testnet prototype rather than
 - No guarantee that a hedge removes SOL price risk; it only addresses funding-rate risk.
 - No unlimited settlement promises. Payouts must be limited by explicit collateral and rate bounds.
 
+### Hard MVP boundary
+
+The first implementation must prove one complete, reproducible lifecycle rather than attempting to launch a full marketplace:
+
+- one selected perpetuals venue;
+- one market, planned as SOL-PERP;
+- one funding-rate source and one documented normalization convention;
+- one supported testnet collateral token;
+- fixed notional for the full contract duration;
+- short, fixed contract duration for the demo;
+- long and short support in the simulator;
+- long-position hedges only in the initial on-chain contract;
+- one authorized testnet publisher;
+- simple offer creation and acceptance, not an order book or sophisticated matching engine.
+
+The simulator and deterministic replay must remain usable without a wallet, Solana RPC, or live data service. This gives the team a demonstrable first milestone and prevents external integrations from hiding errors in the funding economics.
+
 ## 3. Users and user stories
 
 ### User A: Funding protection buyer
@@ -87,12 +104,14 @@ User stories:
 
 ### Core terms
 
-- **Market:** The perp market being hedged, initially `SOL-PERP`.
+- **Market:** The single perp market being hedged in the MVP, initially planned as `SOL-PERP` after one venue is selected.
+- **Venue:** The specific perpetuals exchange or index whose funding observations are used. The venue must be selected before implementation of the funding dataset or on-chain contract.
 - **Notional:** The dollar value of the underlying perp position, for example `$10,000`.
-- **Funding interval:** One period used to compare rates, initially 8 hours.
+- **Position side:** The side of the underlying perp position being hedged: `long` or `short`.
+- **Funding interval:** The interval defined by the selected venue. It is stored in the market configuration and must not be hardcoded as 8 hours throughout the application.
 - **Fixed rate:** The rate agreed by both parties for one funding interval.
 - **Realized rate:** The funding rate published for one market and interval.
-- **Protection buyer:** The participant receiving compensation when realized funding is worse than the fixed rate.
+- **Protection buyer:** The participant receiving compensation when realized funding is worse for their selected position side than the fixed rate would have been.
 - **Risk taker:** The participant paying compensation in that case and receiving compensation when realized funding is better than the fixed rate.
 - **Collateral:** Tokens deposited into the program to support possible settlement obligations.
 - **Oracle publisher:** The authorized source that submits the funding-rate observation used by the contract.
@@ -101,10 +120,10 @@ User stories:
 
 The MVP must use one signed convention everywhere:
 
-- Positive funding means a long generally pays and a short generally receives.
-- Negative funding means a long generally receives and a short generally pays.
+- Positive funding generally means a long pays and a short receives; negative funding generally reverses those cash flows.
 - Rates are stored as signed fixed-point integers, not floating-point numbers.
 - The UI may display percentages, but calculations use integer basis points or a documented higher-precision scale.
+- The funding observation must include the venue's interval boundaries and timestamp semantics.
 
 The displayed wording must always identify whether a number is:
 
@@ -112,15 +131,34 @@ The displayed wording must always identify whether a number is:
 - a total rate across all intervals; or
 - a dollar settlement amount.
 
-### Settlement formula
+### Direction-aware funding and settlement formula
 
-For a simple fixed-notional contract, the settlement amount for interval `i` is:
+The simulator must support both long and short positions. Define a direction sign:
 
 ```text
-interval_settlement_i = notional × (realized_rate_i - fixed_rate)
+s = +1 for a long-position hedge
+s = -1 for a short-position hedge
 ```
 
-The total amount owed to the protection buyer is:
+Under the signed-rate convention, the underlying position's funding cost for interval `i` is:
+
+```text
+actual_funding_cost_i = s × notional × realized_rate_i
+```
+
+Positive cost means the position pays funding; negative cost means it receives funding. The fixed target cost for that interval is:
+
+```text
+fixed_funding_cost_i = s × notional × fixed_rate
+```
+
+For a simple fixed-notional contract, the settlement amount **to the protection buyer** for interval `i` is:
+
+```text
+interval_settlement_i = s × notional × (realized_rate_i - fixed_rate)
+```
+
+The total settlement owed to the protection buyer is:
 
 ```text
 total_settlement = sum(interval_settlement_i)
@@ -130,21 +168,23 @@ Interpretation:
 
 - If `total_settlement > 0`, the risk taker pays the protection buyer.
 - If `total_settlement < 0`, the protection buyer pays the risk taker.
-- The actual perp funding paid at the exchange is separate from this calculation.
-- The hedge is intended to make the combined funding result approximate the agreed fixed rate, subject to fees, collateral limits, rounding, oracle rules, and default risk.
+- The actual perp funding paid or received at the venue is separate from this contract settlement.
+- `actual_funding_cost - total_settlement` should approximate the fixed funding cost, subject to fees, collateral limits, rounding, oracle rules, and default risk.
+- The hedge assumes the notional remains fixed. If the trader changes the underlying position size, the hedge no longer perfectly matches the trader's actual funding exposure.
 
 Example for the demo:
 
 - Notional: `$10,000`
-- Fixed rate: `0.02%` per 8 hours
+- Position side: `long`
+- Fixed rate: `0.02%` per funding interval
 - Duration: 7 days
-- Intervals: `21`
+- Intervals: `21` only if the selected venue produces 21 intervals in that duration
 - Realized rate: `0.10%` for every interval
 - Actual funding paid by the long: `$210`
 - FundingLock settlement: `$168` to the protection buyer
 - Net funding cost: `$42`
 
-The simulator must calculate this from the individual interval data rather than hard-code the example.
+The `$210 / $168 / $42` figures are an illustrative example using an 8-hour interval. The implementation must derive the interval count and timestamps from the selected venue instead of assuming that every venue uses 8-hour funding. The simulator must calculate the result from individual observations rather than hard-code the example.
 
 ## 5. Current repository baseline
 
@@ -163,44 +203,48 @@ There is currently no on-chain program or shared domain model. The implementatio
 
 ### 6.1 Repository structure after the MVP
 
-The exact folders can be adjusted to the selected Solana toolchain, but the target separation should be:
+Keep the current Next.js project in `website/`. Do not create a separate backend or every planned directory immediately. Add each folder only when its corresponding slice is implemented. The target separation is:
 
 ```text
 /
 ├── plan.md
-├── website/                         # Next.js web application
+├── website/                         # Next.js web application and shared TypeScript domain code
 │   ├── app/
 │   │   ├── page.tsx                 # Product landing page and demo entry point
-│   │   ├── dashboard/               # Historical data and active contracts
-│   │   ├── create/                  # Create hedge flow
-│   │   ├── marketplace/             # Open offers and matching
+│   │   ├── dashboard/page.tsx       # Historical data and active contracts
+│   │   ├── simulator/page.tsx       # Wallet-free funding simulator
+│   │   ├── marketplace/page.tsx     # Simple open offers view
 │   │   ├── contracts/[id]/          # Contract detail and settlement history
-│   │   └── api/                     # Only if a server route is needed for the demo
+│   │   └── api/                     # Only for server-side data endpoints if needed
 │   ├── components/
+│   │   ├── funding-chart.tsx
+│   │   ├── hedge-form.tsx
+│   │   ├── settlement-table.tsx
+│   │   └── wallet-connect.tsx
 │   ├── lib/
-│   │   ├── funding.ts               # Pure funding and settlement calculations
-│   │   ├── validation.ts
-│   │   ├── demo-data.ts
-│   │   └── solana-client.ts
-│   └── public/
+│   │   ├── domain/
+│   │   │   ├── funding.ts           # Pure direction-aware funding calculations
+│   │   │   ├── collateral.ts
+│   │   │   └── validation.ts
+│   │   ├── data/
+│   │   │   └── fixtures.ts          # One venue's normalized historical fixtures
+│   │   └── solana/
+│   │       └── client.ts
+│   └── tests/
+│       ├── funding.test.ts
+│       └── collateral.test.ts
 ├── programs/
-│   └── funding-lock/                # Solana/Anchor program, if Anchor is selected
-├── tests/
-│   ├── funding-calculations/        # Deterministic unit tests
-│   ├── program/                     # On-chain instruction tests
-│   └── e2e/                         # User-flow tests where practical
-├── packages/
-│   └── fundinglock-types/           # Shared schemas and serialized domain types
+│   └── funding-lock/                # Solana program, preferably Anchor if selected
 ├── scripts/
-│   ├── seed-funding-data.*
-│   └── replay-settlement.*
-└── docs/
-    ├── oracle-spec.md
-    ├── contract-spec.md
-    └── threat-model.md
+│   └── funding-publisher.ts          # Testnet-only publisher; never run in the browser
+├── docs/
+│   ├── oracle-spec.md
+│   ├── contract-spec.md
+│   └── threat-model.md
+└── tests/                            # Program and end-to-end tests when needed
 ```
 
-Do not create all of these directories at once. Add them when the corresponding slice is implemented.
+If shared types later need to be consumed by both the website and program tooling, extract them into a package only then. A separate database and backend are not required for the first simulator or the deterministic demo.
 
 ### 6.2 Web application
 
@@ -216,15 +260,17 @@ Recommended UI responsibilities:
 - display transaction status and links to the selected Solana explorer;
 - never claim a contract is funded or settled until the chain state confirms it.
 
+Because this is a Next.js App Router application, keep pages as Server Components by default. Use Client Components only for interactive charts, simulator inputs, wallet interactions, and other browser-only behavior. Read `website/AGENTS.md` and the local installed Next.js guidance before changing the starter app.
+
 ### 6.3 Domain and calculation layer
 
 Create a framework-independent calculation module before building complex UI components. It should expose functions similar to:
 
 ```text
 calculateIntervals(start, end, intervalLength)
-calculateFundingCost(notional, fundingRates)
-calculateFixedCost(notional, fixedRate, intervalCount)
-calculateSettlement(notional, fixedRate, realizedRates)
+calculateFundingCost(notional, positionSide, fundingRates)
+calculateFixedCost(notional, positionSide, fixedRate, intervalCount)
+calculateSettlement(notional, positionSide, fixedRate, realizedRates)
 calculateCollateralRequirement(contractTerms)
 buildCashFlowComparison(contractTerms, realizedRates)
 ```
@@ -232,19 +278,37 @@ buildCashFlowComparison(contractTerms, realizedRates)
 Requirements:
 
 - use integer arithmetic and explicit precision;
+- accept `long` and `short` positions in the simulator;
+- use a direction sign in the settlement calculation rather than duplicating long and short formulas;
 - reject invalid rates, dates, notional values, and interval counts;
+- derive interval boundaries from the selected venue configuration;
 - keep rounding rules in one place;
 - return an explanation object containing the inputs, per-interval calculations, totals, and rounding adjustments;
 - make the module runnable in unit tests without a browser, wallet, network, or database.
 
-### 6.4 Solana program
+### 6.4 Data service
+
+The data layer should start with normalized fixtures and only grow into a server-side endpoint if the UI needs persistence or scheduled updates.
+
+Responsibilities:
+
+- ingest or load one selected venue's historical funding observations;
+- normalize the venue's raw rate, timestamps, market identifier, and interval boundaries into the shared schema;
+- preserve the original source metadata and normalization version;
+- reject observations that are missing required fields or fall outside configured bounds;
+- serve the same normalized observations to the dashboard, simulator, replay script, and publisher;
+- keep the deterministic fixture path available when the external source is unavailable.
+
+Do not add a database or separate backend before the simulator or simple offer flow needs server-side persistence. If an API is later needed, keep it read-only for historical data in the first version and keep publisher signing operations outside Next.js and outside the browser.
+
+### 6.5 Solana program
 
 The program should be a narrow escrow and settlement program, not a complete derivatives engine.
 
 #### Suggested accounts
 
 - **GlobalConfig PDA:** program authority, supported market identifiers, collateral mint, oracle authority, pause flag, and version.
-- **MarketConfig PDA:** market symbol, funding interval, precision, minimum and maximum accepted rates, and active/inactive status.
+- **MarketConfig PDA:** one selected venue and market, venue identifier, funding interval, timestamp convention, precision, minimum and maximum accepted rates, maximum duration, maximum notional, and active/inactive status.
 - **Contract PDA:** immutable terms and mutable lifecycle state.
 - **Contract vault token account:** collateral controlled by the program.
 - **Oracle observation PDA:** one observation for each contract and funding interval, or a market-period observation referenced by multiple contracts.
@@ -256,7 +320,9 @@ At minimum, record:
 
 - contract identifier;
 - market identifier;
+- venue identifier and oracle configuration version;
 - protection buyer and risk-taker public keys;
+- position side, initially restricted to `long` on-chain while the simulator supports both sides;
 - notional amount;
 - fixed rate;
 - start and end timestamps;
@@ -276,8 +342,8 @@ At minimum, record:
 #### Suggested lifecycle
 
 ```text
-Draft/Open → Matched → Funded → Active → Settling → Settled
-                    ↘ Cancelled
+Open → Matched → Funded → Active → Settling → Settled
+              ↘ Cancelled
 Active/Settling → Defaulted or Paused
 ```
 
@@ -298,17 +364,18 @@ The state transitions must be enforced by the program. The UI must derive its la
 11. `cancel_unmatched_offer`
 12. `pause_market` / `unpause_market` for the configured authority
 
-The first demo may combine some instructions if doing so makes the program easier to audit and explain, but each authorization and state transition must remain explicit.
+The first on-chain contract should support one market, one collateral mint, fixed notional, a short fixed duration, and long-position hedges only. The account schema may include a position-side enum so short hedges can be added after the direction-aware simulator and tests are proven. The first demo may combine some instructions if doing so makes the program easier to audit and explain, but each authorization and state transition must remain explicit.
 
-### 6.5 Oracle and funding data
+### 6.6 Oracle and funding data
 
 Solana cannot discover an external exchange's funding rate by itself. The MVP must make this dependency visible.
 
 #### MVP oracle approach
 
-- Use one authorized publisher key on a Solana test network.
+- Use one authorized publisher key on a Solana test network. The publisher signing key must remain in the separate script/service and must never be exposed through the browser bundle.
 - Generate observations from a checked-in historical fixture or a deterministic replay script.
 - Include the market, venue identifier, interval start, interval end, signed rate, timestamp, sequence number, and publisher signature in each observation.
+- Normalize the selected venue's raw data before publishing it, with the normalization rule documented and versioned.
 - Allow only one valid observation per market and interval.
 - Reject observations outside the contract's allowed time window.
 - Reject duplicate or out-of-order sequence numbers.
@@ -328,7 +395,7 @@ Before mainnet use, define and implement a stronger design, such as multiple ind
 - who can pause settlement;
 - how oracle compromise is contained.
 
-### 6.6 Matching mechanism
+### 6.7 Matching mechanism
 
 Do not begin with a complex on-chain order book.
 
@@ -343,6 +410,7 @@ For the hackathon:
 Matching must compare at least:
 
 - market;
+- venue and funding interval configuration;
 - direction/role;
 - notional amount or permitted tolerance;
 - fixed rate;
@@ -354,30 +422,38 @@ Matching must compare at least:
 
 The UI should explain that matching is currently an offer board or demo matcher, not a deep liquid market.
 
-### 6.7 Collateral and insolvency rules
+### 6.8 Collateral and insolvency rules
 
 The protocol must never imply that a signed rate hedge guarantees payment regardless of collateral.
 
-For each contract, calculate:
+For each contract, calculate the maximum amount that either participant could owe under the contract's permitted rate bounds, not from the expected or historical average rate.
+
+For each interval `i`, define:
 
 ```text
-max_positive_payout = notional × sum(max_rate_i - fixed_rate)
-max_negative_payout = notional × sum(fixed_rate - min_rate_i)
+settlement_i(rate) = direction_sign × notional × (rate - fixed_rate)
 ```
 
-For a constant-rate MVP, this can be simplified using the interval count. The contract must also define a safety buffer and minimum collateral ratio.
+Then calculate:
+
+```text
+max_buyer_payout = sum(max(0, settlement_i(min_rate_i), settlement_i(max_rate_i)))
+max_buyer_payment = sum(max(0, -settlement_i(min_rate_i), -settlement_i(max_rate_i)))
+```
+
+For a constant-rate MVP, this can be simplified using the interval count. The exact rate bounds, maximum duration, maximum notional, payout cap, safety buffer, and minimum collateral ratio must be stored in the market configuration or contract terms.
 
 Recommended MVP behavior:
 
-- require the risk taker to deposit enough collateral for the maximum positive payout;
-- require the protection buyer to deposit enough collateral for the maximum negative payout;
+- require the risk taker to deposit at least `max_buyer_payout` plus the configured safety buffer;
+- require the protection buyer to deposit at least `max_buyer_payment` plus the configured safety buffer;
 - keep collateral in a program-controlled token vault;
 - prevent activation if either side is underfunded;
 - cap every submitted rate and every aggregate payout;
-- if a payout exceeds available collateral due to a bug or an explicitly simulated default, mark the contract `Defaulted`, pay according to the documented priority/pro-rata rule, and expose the shortfall;
+- with correct bounds, activation should make the permitted settlement fully collateralized; if a payout nevertheless exceeds available collateral because of a program error or explicitly simulated default, mark the contract `Defaulted`, pay only according to the documented priority/pro-rata rule, and expose the shortfall;
 - never allow the UI to display an unpaid amount as if it were fully paid.
 
-For the demo, the default rule can be simple and deterministic. It must be clearly labeled as a prototype rule, not a complete production credit model.
+For the demo, the default rule can be simple and deterministic, such as distributing available collateral to the entitled party and recording the unpaid remainder. It must be clearly labeled as a prototype rule, not a complete production credit model.
 
 ## 7. User experience plan
 
@@ -390,7 +466,7 @@ Content:
 - headline: “Make perpetual funding costs more predictable”;
 - simple diagram: perp position → changing funding → FundingLock hedge;
 - short explanation of the two sides;
-- example showing `$10,000`, `0.02% fixed`, `21 intervals`, and `$42` target funding cost;
+- illustrative example showing `$10,000`, `0.02% fixed`, the selected venue's interval count, and the target funding cost;
 - prominent “Try the simulator” action;
 - clear “testnet/demo only” and “not investment advice” notice.
 
@@ -398,7 +474,8 @@ Content:
 
 Features:
 
-- market selector, initially only SOL-PERP;
+- market label, initially only SOL-PERP;
+- selected venue and funding interval label;
 - date range selector;
 - line/bar chart of funding rates;
 - positive/negative color treatment;
@@ -416,6 +493,8 @@ Inputs:
 - fixed funding rate;
 - start date and duration;
 - selected historical period or generated scenario.
+
+The simulator supports both long and short positions. It must show the selected venue's actual interval length and must not silently assume 8-hour funding.
 
 Outputs:
 
@@ -471,145 +550,130 @@ Provide a guided “play week” flow:
 
 ## 8. Implementation phases
 
-### Phase 0 — Product and protocol specification
+The implementation is intentionally limited to six phases. Each phase produces something demonstrable and independently testable. The Solana program is not started until the direction-aware funding engine, venue convention, and collateral rules are verified.
 
-Deliverables:
+### Phase 1 — Funding engine and simulator
 
-- this plan refined into a short contract specification;
-- signed-rate convention;
-- precision and rounding rules;
-- state machine;
-- collateral and payout bounds;
-- oracle input schema;
-- explicit list of testnet-only assumptions.
+Start here. This is the first milestone and does not require a wallet, Solana RPC, or live market data.
 
-Exit criteria:
+Before writing the calculation code, select and document one perpetuals venue and its actual funding convention. Record the venue identifier, market symbol, interval length, interval boundaries, timestamp semantics, rate units, and normalization rule.
 
-- two developers can calculate the same example result independently;
-- every contract state has an allowed transition and an owner;
-- missing oracle data and under-collateralization have documented outcomes.
+Build:
 
-### Phase 1 — Domain model and deterministic simulator
+- a pure TypeScript calculation module;
+- typed contract and funding-observation models;
+- long and short position support in the simulator;
+- direction-aware actual funding, fixed funding, settlement, and net cash-flow calculations;
+- integer fixed-point arithmetic and centralized rounding rules;
+- deterministic test data for stable, negative, and sharply increasing funding;
+- collateral and maximum-payout calculations from rate bounds, not expected rates;
+- tests for missing observations, duplicate observations, invalid inputs, rounding, and payout limits.
 
-Deliverables:
+Done when:
 
-- typed contract and funding observation models;
-- pure settlement functions;
-- historical fixture format;
-- scenario generator;
-- unit tests for normal, negative, spiking, zero, rounding, and missing-data cases.
-
-Exit criteria:
-
-- the `$10,000 / 0.02% / 21 intervals` example returns `$42` net target cost;
+- the documented `$10,000 / 0.02% / 21 intervals` long example returns `$42` net target cost when those 21 intervals are valid for the selected venue;
+- a short-position scenario produces the opposite settlement sign for the same realized and fixed rates;
 - changing one interval changes the result by exactly the expected integer amount;
-- no calculation depends on browser state or floating-point arithmetic.
+- the selected venue's interval is read from configuration rather than hardcoded as 8 hours;
+- all core calculations pass unit tests with no browser, wallet, network, or database dependency.
 
-### Phase 2 — Frontend education and simulator
+### Phase 2 — Next.js product interface
 
-Deliverables:
+Build the complete wallet-free demo experience in the existing `website/` application.
 
-- branded FundingLock landing page;
-- funding dashboard;
-- simulator form and results table;
-- responsive layout;
-- loading, empty, invalid-input, and error states;
-- risk and testnet disclaimers.
+Deliver:
 
-Exit criteria:
+- FundingLock landing page and plain-language education;
+- historical funding dashboard for the one selected venue and market;
+- simulator form supporting long and short positions;
+- per-interval settlement ledger and cash-flow comparison;
+- scenario buttons for stable, high, negative, spike, missing, and invalid data;
+- clear venue, interval, timezone, and data-source labels;
+- responsive loading, empty, validation, and error states;
+- testnet-only and financial-risk disclosures.
 
-- a new user can complete a simulation without connecting a wallet;
-- the page explains that the perp position and FundingLock contract are separate;
-- the UI matches the shared calculation module.
+Keep the simulator useful if Solana RPC or an external data source is unavailable. Pages should remain Server Components by default; use Client Components only where charts, forms, or browser wallet behavior require them.
 
-### Phase 3 — Wallet and Solana client foundation
+Done when: someone unfamiliar with FundingLock can understand the problem and complete a correct simulation in under a minute without connecting a wallet.
 
-Deliverables:
+### Phase 3 — Minimal Solana program
 
-- wallet adapter integration suitable for the selected Solana test network;
-- network indicator and wrong-network guidance;
-- transaction helper with confirmation and error handling;
-- typed client methods for each program instruction;
-- explorer links.
+Build a narrowly scoped escrow and settlement program, preferably using Anchor if that is the selected toolchain.
 
-Exit criteria:
+The first contract supports only:
 
-- a user can connect and disconnect a test wallet;
-- failed, rejected, and pending transactions are distinguishable;
-- no transaction is presented as successful before confirmation.
+- one selected venue and one market;
+- one supported testnet collateral token;
+- fixed notional for the full contract duration;
+- a short, fixed duration;
+- long-position hedges on-chain;
+- one authorized testnet publisher;
+- maximum rate, duration, notional, and payout limits.
 
-### Phase 4 — Minimal Solana escrow program
+Implement only the instructions required for this lifecycle:
 
-Deliverables:
+- initialize market configuration;
+- create and accept a hedge;
+- deposit collateral;
+- activate the contract after both sides meet the maximum-bound collateral requirement;
+- record validated funding observations;
+- settle and withdraw collateral.
 
-- config and market accounts;
-- contract creation and acceptance;
-- collateral deposits;
-- activation checks;
-- vault accounting;
-- cancellation of unmatched contracts;
-- withdrawal rules.
+The contract schema should include a position-side enum for future short support, but the initial on-chain instruction must reject `short` until the long-only path is verified.
 
-Exit criteria:
+Done when program tests prove that unauthorized users cannot change contract terms, withdraw locked collateral, submit invalid observations, or settle the same interval twice.
 
-- program tests cover authorized and unauthorized callers;
-- terms cannot change after activation;
-- users cannot withdraw collateral needed for an active obligation;
-- token amounts and account ownership are checked by the program.
+### Phase 4 — Wallet and contract integration
 
-### Phase 5 — Oracle publisher and settlement
+Connect the frontend to the deployed testnet program.
 
-Deliverables:
+Build:
 
-- deterministic funding observation fixture;
-- publisher script or service;
-- observation account validation;
-- one-observation-per-interval rule;
-- interval settlement instruction;
-- finalization and payout instruction;
-- missing-data and paused-contract behavior.
+- wallet connection and network validation;
+- wrong-network guidance;
+- transaction helpers with pending, rejected, failed, and confirmed states;
+- typed Solana client methods for the program instructions;
+- simple offer creation and acceptance;
+- test collateral deposits;
+- contract detail pages that read actual on-chain state;
+- transaction signatures and explorer links.
 
-Exit criteria:
+Do not build an on-chain order book, multiple venues, or a complex matching engine. The first marketplace is a simple offer board or deterministic demo offer flow.
 
-- the complete week replay can be run from a clean test environment;
-- the on-chain accumulated settlement matches the off-chain simulator;
-- duplicate, late, out-of-range, and unauthorized observations are rejected.
+Done when two test wallets can create, accept, fund, and inspect the same long-position contract, and the interface never reports an unconfirmed transaction as successful.
 
-### Phase 6 — Marketplace and end-to-end demo
+### Phase 5 — Funding data publisher and settlement
 
-Deliverables:
+Build a separate trusted publisher script or service. Its signing key must never be available to the browser.
 
-- open offers view;
-- create and accept offer flows;
-- contract detail page;
-- collateral status;
-- guided replay mode;
-- transaction and explorer links;
-- seeded demo data for reliable presentation.
+Build:
 
-Exit criteria:
+- one venue-specific historical fixture or replay input;
+- raw-data normalization into the shared observation schema;
+- publisher validation for market, venue, timestamps, sequence numbers, rate bounds, and signatures;
+- one-observation-per-interval enforcement;
+- interval settlement and finalization;
+- explicit missing-data, late-data, paused-state, and invalid-data behavior;
+- an off-chain/on-chain reconciliation command.
 
-- two wallets can complete the happy path from offer to withdrawal;
-- the demo can be reset and repeated;
-- the app remains understandable when chain actions fail.
+Done when a complete seven-day replay produces the same result in the TypeScript calculation engine and on-chain contract, with explicit handling for missing or invalid observations.
 
-### Phase 7 — Hardening, testing, and presentation
+### Phase 6 — Final demo and hardening
 
-Deliverables:
+Build a repeatable end-to-end demonstration rather than production-grade market infrastructure.
 
-- threat model;
-- program and UI test report;
-- stress scenarios;
-- performance and RPC failure handling;
-- demo script;
-- limitations and future-work page;
-- deployment instructions for the website and testnet program.
+Include:
 
-Exit criteria:
+- stable, negative, and spiking funding replays;
+- two users agreeing on a long-position hedge;
+- collateral deposits and settlement finalization;
+- a missing-observation demonstration;
+- an insufficient-collateral or shortfall demonstration using the documented prototype rule;
+- resettable seeded demo data;
+- threat model, limitations, and testnet-only documentation;
+- website, program, calculation, and replay check instructions.
 
-- all required checks pass;
-- known limitations are visible in the repository and demo;
-- the presentation shows both successful settlement and at least one failure scenario.
+Done when the entire demo can be reset and repeated with reproducible results, and the presentation shows both successful settlement and at least one visible failure scenario.
 
 ## 9. Testing strategy
 
@@ -617,6 +681,10 @@ Exit criteria:
 
 Test at minimum:
 
+- long position with realized funding greater than fixed rate;
+- long position with realized funding lower than fixed rate;
+- short position with the same rates and the opposite settlement direction;
+- fixed notional maintained across all intervals;
 - positive funding greater than fixed rate;
 - positive funding lower than fixed rate;
 - negative funding;
@@ -629,6 +697,10 @@ Test at minimum:
 - integer rounding at every boundary;
 - missing observations;
 - duplicate observations;
+- venue-specific interval boundaries and timestamps;
+- unsupported or mismatched venue identifiers;
+- maximum payout derived from the permitted rate bounds;
+- collateral requirement based on maximum possible settlement rather than expected funding;
 - rate spikes at the configured cap;
 - settlement at the collateral limit;
 - settlement exceeding collateral.
@@ -638,6 +710,7 @@ Test at minimum:
 Test:
 
 - account initialization;
+- one-market, one-venue, one-collateral configuration checks;
 - correct PDA derivation;
 - participant authorization;
 - wrong market or wrong collateral mint;
@@ -646,6 +719,7 @@ Test:
 - unauthorized oracle publisher;
 - wrong interval or duplicate interval;
 - out-of-range rates;
+- rejected short-position contract while the first on-chain version is long-only;
 - premature finalization;
 - double finalization;
 - withdrawal limits;
@@ -690,6 +764,7 @@ This project handles a financial-style agreement, so the risk model is part of t
 - Enforce state transitions in the program.
 - Prevent double settlement and double withdrawal.
 - Bound rates, payout amounts, interval counts, and contract durations.
+- Keep the notional fixed for the contract duration in the MVP; do not silently net settlement against a changing position size.
 - Include a pause mechanism with a clearly defined authority.
 - Avoid unnecessary upgrade authority in the demo, and document who controls it.
 - Emit events for contract creation, funding, oracle observations, settlement, default, and withdrawal.
@@ -697,6 +772,7 @@ This project handles a financial-style agreement, so the risk model is part of t
 ### Oracle safety
 
 - Identify the venue and source of every observation.
+- Store and validate the venue-specific interval and timestamp convention.
 - Make data freshness and interval boundaries explicit.
 - Reject unauthorized, duplicate, stale, or out-of-range observations.
 - Keep an audit trail of submitted observations.
@@ -706,7 +782,9 @@ This project handles a financial-style agreement, so the risk model is part of t
 ### Economic safety
 
 - Require collateral before activation.
-- Cap the maximum rate and settlement.
+- Calculate collateral from the maximum permitted settlement under the configured rate bounds, not from an expected or average funding rate.
+- Cap the maximum rate, duration, notional, and settlement.
+- Keep the publisher signing key outside the browser and outside committed files.
 - Show maximum loss before acceptance.
 - Do not call an under-collateralized agreement “guaranteed.”
 - Make fees and rounding visible.
@@ -746,13 +824,16 @@ The MVP is complete when all of the following are true:
 
 - A visitor understands the problem and product without prior DeFi knowledge.
 - The historical dashboard shows a real or clearly labeled fixture dataset.
-- The simulator calculates the documented example correctly.
-- Two test users can agree on terms and deposit collateral.
+- The simulator supports both long and short positions and calculates the documented example correctly.
+- The selected venue, interval, timestamps, and normalization convention are visible in the UI.
+- Two test users can agree on a long-position hedge and deposit collateral.
 - The program stores the contract and vault state on Solana testnet.
 - An authorized publisher can submit the required funding observations.
 - The program or verified client calculates and settles the difference.
 - Both sides can see the full settlement ledger and final result.
 - The app handles missing data, rejected transactions, wrong network, and under-collateralization visibly.
+- Collateral requirements are based on maximum permitted payout, not expected funding.
+- The initial on-chain contract is explicitly limited to one venue, one market, one collateral token, fixed notional, and long hedges.
 - The demo does not claim that FundingLock protects against SOL price movement.
 - The repository has repeatable setup, test, lint, build, and demo instructions.
 
@@ -761,18 +842,17 @@ The MVP is complete when all of the following are true:
 Implement in this order to reduce rework:
 
 1. Read the local Next.js guidance in `website/AGENTS.md` and the relevant installed Next.js documentation before editing the app.
-2. Replace the starter page with the FundingLock landing page and a simple static simulator shell.
-3. Add the pure funding calculation module and tests before connecting UI inputs to it.
-4. Add deterministic fixture data and the historical dashboard.
-5. Decide and document the Solana toolchain, test network, collateral mint, wallet adapter, and program account schema.
-6. Build and test the escrow program independently from the website.
-7. Add the typed Solana client to the website.
-8. Add wallet connection, offer creation, acceptance, and collateral flows.
-9. Add the authorized oracle publisher and interval settlement.
-10. Add the guided two-wallet replay and failure demonstrations.
-11. Run the complete check suite and prepare the demo script.
+2. Select one venue and document its funding interval, timestamps, rate units, and normalization rules.
+3. Build the pure direction-aware funding engine, collateral calculator, deterministic fixtures, and unit tests.
+4. Replace the starter page with the FundingLock landing page, historical dashboard, and wallet-free simulator.
+5. Choose and document the Solana toolchain, test network, collateral mint, wallet adapter, and long-only contract schema.
+6. Build and test the minimal escrow program independently from the website.
+7. Add the typed Solana client, wallet connection, simple offer creation/acceptance, and collateral flows.
+8. Add the separate authorized funding publisher and interval settlement.
+9. Add the guided two-wallet replay, missing-data scenario, and collateral-shortfall scenario.
+10. Run the complete check suite and prepare the repeatable demo script.
 
-Do not begin with live external funding-rate ingestion or a complex marketplace. The simulator and deterministic fixture path should remain available even when external services are unavailable.
+Do not begin with live multi-venue ingestion, a complex marketplace, short-position on-chain contracts, or a sophisticated oracle network. The simulator and deterministic fixture path should remain available even when external services are unavailable.
 
 ## 14. Proposed checks and commands
 
@@ -799,24 +879,30 @@ pnpm oracle:replay
 
 The exact Solana commands depend on the selected program framework and should be added only after that toolchain is chosen and installed. A check is only considered complete when it has actually run successfully in a clean or documented environment.
 
-## 15. Decisions to make before implementation reaches testnet
+## 15. MVP decisions and implementation gates
 
-These choices affect the contract and should be written down before program development:
+These decisions must be documented before Phase 3 begins. The unresolved venue choice is the first gate because it affects every funding observation, interval calculation, UI label, oracle input, and contract term.
 
-1. Which venue or index defines the SOL funding rate?
-2. Is the first rate convention based on a long payer, a short payer, or a neutral signed index?
-3. Which collateral token is used on testnet?
-4. Is the fixed rate quoted per 8 hours, per day, or another interval?
-5. Are start and end timestamps inclusive or exclusive?
-6. What happens when a funding observation is late or missing?
-7. What are the maximum rate, duration, notional, and payout limits?
-8. How much collateral must each party post?
-9. Who can pause the market or change the oracle authority?
-10. What is the default rule if collateral cannot cover the calculated amount?
-11. Are fees charged, and who receives them?
-12. Which testnet and wallet adapter will be supported first?
-13. Will matching use local fixtures, a server-side store, or an on-chain offer board?
-14. Which parts are intentionally demo-only and must not be used with real funds?
+| Decision | MVP recommendation |
+| --- | --- |
+| Perpetuals venue | Choose one venue with accessible historical funding data and clearly documented conventions. Do not support multiple venues initially. |
+| Market | Support one market, planned as SOL-PERP. |
+| Funding interval | Match the selected venue's actual interval and timestamp semantics; do not hardcode 8 hours. |
+| Rate convention | Store a signed normalized rate and document how the venue's raw value maps to it. |
+| Position direction | Support long and short in the simulator; start with long-position hedges on-chain and add short contracts only after the sign model is verified. |
+| Collateral | Use one supported testnet token with explicit token-mint validation. |
+| Notional | Keep it fixed for the full contract duration. |
+| Contract duration | Use a short, fixed duration for the demo. |
+| Oracle | Use one authorized publisher with historical replay data, clearly labeled as a prototype. Keep its signing key outside the browser. |
+| Matching | Use simple offer creation and acceptance or deterministic demo offers; do not build an order book. |
+| Payout limits | Set maximum rates, duration, notional, and aggregate payout. Require collateral for the maximum permitted settlement plus the configured buffer before activation. |
+| Missing observations | Pause final settlement until the documented recovery or timeout rule is applied; never treat missing data as zero. |
+| Insufficient collateral | Activation should fail when required collateral is missing. If an unexpected shortfall occurs after activation, mark the contract defaulted, distribute available collateral according to the prototype rule, and record the unpaid amount. |
+| Time boundaries | Define whether start and end timestamps are inclusive or exclusive and use the same rule off-chain and on-chain. |
+| Fees | Omit fees from the first demo unless they are needed to explain a specific cost; if added, show them separately from funding settlement. |
+| Testnet and wallet | Select one Solana test network and wallet adapter before integration. |
+| Backend | Do not add a database or separate backend until the simulator or simple offer flow requires server-side persistence. |
+| Demo-only boundaries | Clearly identify the testnet publisher, fixture data, collateral model, and default behavior as prototype-only. |
 
 ## 16. Final product promise
 
