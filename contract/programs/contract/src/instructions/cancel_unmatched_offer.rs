@@ -17,7 +17,7 @@ pub struct CancelUnmatchedOffer<'info> {
     #[account(
         mut,
         seeds = [VAULT_SEED, contract_account.key().as_ref()],
-        bump = contract_account.vault_bump
+        bump
     )]
     pub vault: UncheckedAccount<'info>,
 
@@ -41,10 +41,15 @@ pub fn handle_cancel_unmatched_offer(ctx: Context<CancelUnmatchedOffer>) -> Resu
     let refund_amount = contract.deposited_buyer_collateral;
     if refund_amount > 0 && ctx.accounts.vault.lamports() >= refund_amount {
         let contract_key = contract.key();
+        let bump = if contract.vault_bump != 0 {
+            contract.vault_bump
+        } else {
+            ctx.bumps.vault
+        };
         let vault_seeds = &[
             VAULT_SEED,
             contract_key.as_ref(),
-            &[contract.vault_bump],
+            &[bump],
         ];
         let signer_seeds = &[&vault_seeds[..]];
 

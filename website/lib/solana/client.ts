@@ -5,10 +5,52 @@
  * and high-level contract interaction methods.
  */
 
+import { Buffer } from 'buffer';
 import { PublicKey, TransactionInstruction, SystemProgram } from '@solana/web3.js';
 import type { ContractStatus } from '../domain/types.ts';
 
+if (typeof window !== 'undefined') {
+  (window as unknown as { Buffer?: typeof Buffer }).Buffer =
+    (window as unknown as { Buffer?: typeof Buffer }).Buffer || Buffer;
+}
+
+export function writeU8(buf: Uint8Array, offset: number, value: number): void {
+  buf[offset] = value;
+}
+
+export function writeU16LE(buf: Uint8Array, offset: number, value: number): void {
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  view.setUint16(offset, value, true);
+}
+
+export function writeU64LE(buf: Uint8Array, offset: number, value: bigint | number): void {
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  view.setBigUint64(offset, BigInt(value), true);
+}
+
+export function writeI64LE(buf: Uint8Array, offset: number, value: bigint | number): void {
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  view.setBigInt64(offset, BigInt(value), true);
+}
+
+export function readU16LE(buf: Uint8Array, offset: number): number {
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  return view.getUint16(offset, true);
+}
+
+export function readU64LE(buf: Uint8Array, offset: number): bigint {
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  return view.getBigUint64(offset, true);
+}
+
+export function readI64LE(buf: Uint8Array, offset: number): bigint {
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  return view.getBigInt64(offset, true);
+}
+
 export const PROGRAM_ID = new PublicKey('HSMBzbTfQQgLKk9Bv7d9WkLiK1yvKCs9FkeGgBhgfZj9');
+export const TESTNET_RPC_URL =
+  process.env.NEXT_PUBLIC_SOLANA_RPC || 'https://api.testnet.solana.com';
 export const TESTNET_ORACLE_PUBKEY = new PublicKey('A5oiFqG3hn39WSCGvCvSCbkWQJ8kzjNQM135WXnowv3E');
 
 export const SEEDS = {
@@ -43,14 +85,15 @@ export function getInstructionDiscriminator(
  */
 export function stringToBytes16(str: string): Buffer {
   const buf = Buffer.alloc(16);
-  buf.write(str.slice(0, 16), 'utf-8');
+  const encoded = new TextEncoder().encode(str.slice(0, 16));
+  buf.set(encoded, 0);
   return buf;
 }
 
 export function bytes16ToString(bytes: Uint8Array): string {
   let end = bytes.indexOf(0);
   if (end === -1) end = bytes.length;
-  return Buffer.from(bytes.slice(0, end)).toString('utf-8');
+  return new TextDecoder().decode(bytes.slice(0, end));
 }
 
 /**
@@ -94,7 +137,7 @@ export function getObservationPda(
   programId = PROGRAM_ID
 ): [PublicKey, number] {
   const indexBuf = Buffer.alloc(2);
-  indexBuf.writeUInt16LE(intervalIndex, 0);
+  writeU16LE(indexBuf, 0, intervalIndex);
   return PublicKey.findProgramAddressSync(
     [SEEDS.OBSERVATION, contractPubkey.toBuffer(), indexBuf],
     programId
@@ -128,15 +171,15 @@ export function buildInitializeMarketIx(params: {
   offset += 16;
   stringToBytes16(params.marketSymbol).copy(data, offset);
   offset += 16;
-  data.writeBigUInt64LE(BigInt(params.intervalSeconds), offset);
+  writeU64LE(data, offset, params.intervalSeconds);
   offset += 8;
-  data.writeBigInt64LE(BigInt(params.minRatePpm), offset);
+  writeI64LE(data, offset, params.minRatePpm);
   offset += 8;
-  data.writeBigInt64LE(BigInt(params.maxRatePpm), offset);
+  writeI64LE(data, offset, params.maxRatePpm);
   offset += 8;
-  data.writeBigUInt64LE(BigInt(params.maxNotionalCents), offset);
+  writeU64LE(data, offset, params.maxNotionalCents);
   offset += 8;
-  data.writeUInt16LE(params.safetyBufferBps, offset);
+  writeU16LE(data, offset, params.safetyBufferBps);
   offset += 2;
   params.oracleAuthority.toBuffer().copy(data, offset);
 
@@ -173,11 +216,11 @@ export function buildCreateOfferIx(params: {
   const data = Buffer.alloc(8 + 16 + 1 + 8 + 8 + 2 + 8);
   getInstructionDiscriminator('createOffer').copy(data, 0);
   stringToBytes16(params.contractId).copy(data, 8);
-  data.writeUInt8(params.positionSide === 'long' ? 0 : 1, 24);
-  data.writeBigUInt64LE(BigInt(params.notionalCents), 25);
-  data.writeBigInt64LE(BigInt(params.fixedRatePpm), 33);
-  data.writeUInt16LE(params.intervalCount, 41);
-  data.writeBigInt64LE(BigInt(params.startTime), 43);
+  writeU8(data, 24, params.positionSide === 'long' ? 0 : 1);
+  writeU64LE(data, 25, params.notionalCents);
+  writeI64LE(data, 33, params.fixedRatePpm);
+  writeU16LE(data, 41, params.intervalCount);
+  writeI64LE(data, 43, params.startTime);
 
   return new TransactionInstruction({
     programId,
@@ -225,7 +268,7 @@ export function buildDepositCollateralIx(params: {
   const programId = params.programId || PROGRAM_ID;
   const data = Buffer.alloc(8 + 8);
   getInstructionDiscriminator('depositCollateral').copy(data, 0);
-  data.writeBigUInt64LE(BigInt(params.amountLamports), 8);
+  writeU64LE(data, 8, params.amountLamports);
 
   return new TransactionInstruction({
     programId,
@@ -279,9 +322,9 @@ export function buildRecordObservationIx(params: {
 
   const data = Buffer.alloc(8 + 2 + 8 + 8);
   getInstructionDiscriminator('recordFundingObservation').copy(data, 0);
-  data.writeUInt16LE(params.intervalIndex, 8);
-  data.writeBigInt64LE(BigInt(params.realizedRatePpm), 10);
-  data.writeBigInt64LE(BigInt(params.recordedAt), 18);
+  writeU16LE(data, 8, params.intervalIndex);
+  writeI64LE(data, 10, params.realizedRatePpm);
+  writeI64LE(data, 18, params.recordedAt);
 
   return new TransactionInstruction({
     programId,

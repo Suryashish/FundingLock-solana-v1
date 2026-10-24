@@ -6,7 +6,7 @@ import {
   WalletProvider,
 } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
-import { TESTNET_RPC_URL } from "@/lib/contract";
+import { TESTNET_RPC_URL } from "../lib/solana/client.ts";
 
 // Import wallet adapter CSS
 import "@solana/wallet-adapter-react-ui/styles.css";

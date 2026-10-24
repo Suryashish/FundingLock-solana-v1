@@ -18,15 +18,11 @@ import {
   INTERVAL_SECONDS,
 } from "../lib/data/fixtures.ts";
 import {
-  AlertTriangle,
   RotateCcw,
   Lock,
   ArrowUpRight,
   ArrowDownRight,
-  Sparkles,
   ChevronDown,
-  MoreHorizontal,
-  CheckCircle2,
 } from "lucide-react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
@@ -40,7 +36,6 @@ import {
   fetchContractAccount,
   fetchMarketConfig,
   formatSignature,
-  lamportsToSol,
   simulateAndSendTransaction,
   type OnChainContractState,
   type OnChainMarketConfig,
@@ -57,9 +52,8 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
   const [notionalDollars, setNotionalDollars] = useState<number>(10000);
   const [fixedRatePercent, setFixedRatePercent] = useState<number>(0.02);
   const [selectedScenarioId, setSelectedScenarioId] = useState<string>("baseline");
-  const [showVaultDetails, setShowVaultDetails] = useState<boolean>(false);
-  const [paramMenuOpen, setParamMenuOpen] = useState<boolean>(false);
-  const [settlementMenuOpen, setSettlementMenuOpen] = useState<boolean>(false);
+  const [showLedger, setShowLedger] = useState<boolean>(false);
+
   const { connection } = useConnection();
   const wallet = useWallet();
   const { setVisible } = useWalletModal();
@@ -118,51 +112,11 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
     };
   }, [connection]);
 
-  const handleInitializeMarket = async () => {
-    if (!wallet.publicKey) {
-      setChainAction({ state: "error", message: "Connect a wallet before initializing the Testnet market." });
-      return;
-    }
-
-    setChainAction({ state: "pending", message: "Simulating market initialization…" });
-    try {
-      const signature = await simulateAndSendTransaction({
-        connection,
-        wallet,
-        description: "Market initialization",
-        instructions: [
-          buildInitializeMarketIx({
-            venueId: BINANCE_SOL_CONFIG.venueId,
-            marketSymbol: BINANCE_SOL_CONFIG.marketSymbol,
-            intervalSeconds: BINANCE_SOL_CONFIG.intervalSeconds,
-            minRatePpm: BINANCE_SOL_CONFIG.minRatePpm,
-            maxRatePpm: BINANCE_SOL_CONFIG.maxRatePpm,
-            maxNotionalCents: BINANCE_SOL_CONFIG.maxNotionalCents,
-            safetyBufferBps: BINANCE_SOL_CONFIG.safetyBufferBps,
-            oracleAuthority: wallet.publicKey,
-            admin: wallet.publicKey,
-          }),
-        ],
-      });
-      const config = await fetchMarketConfig(connection);
-      setMarketConfig(config);
-      setChainAction({
-        state: "success",
-        message: `Market initialized. Transaction ${formatSignature(signature)}.`
-      });
-    } catch (error) {
-      setChainAction({
-        state: "error",
-        message: error instanceof Error ? error.message : "Market initialization failed.",
-      });
-    }
-  };
-
   const handleCreateOfferOnChain = async () => {
     if (!wallet.connected || !wallet.publicKey) {
       setChainAction({
         state: "error",
-        message: "Wallet not connected. Opening wallet selector... Please connect Phantom or Solflare on Solana Testnet.",
+        message: "Wallet not connected. Opening wallet selector...",
       });
       setVisible(true);
       return;
@@ -177,16 +131,14 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
 
     setChainAction({ state: "pending", message: "Verifying Testnet balance and preparing transaction…" });
     try {
-      // 1. Balance verification
       const lamports = await connection.getBalance(wallet.publicKey, "confirmed");
       if (lamports < 5_000_000) {
         throw new Error(
-          `Insufficient Testnet SOL (balance: ${(lamports / 1e9).toFixed(4)} SOL). You need ~0.005 SOL for transaction fees & account rent. Ensure your wallet network is set to Testnet, and fund it at https://faucet.solana.com.`
+          `Insufficient Testnet SOL (balance: ${(lamports / 1e9).toFixed(4)} SOL). You need ~0.005 SOL for transaction fees. Fund at https://faucet.solana.com.`
         );
       }
 
-      // 2. Market config check & auto-initialization bundling
-      let config = marketConfig ?? (await fetchMarketConfig(connection));
+      const config = marketConfig ?? (await fetchMarketConfig(connection));
       const instructions: TransactionInstruction[] = [];
 
       if (!config) {
@@ -207,7 +159,6 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
         throw new Error("The on-chain SOL-PERP market is currently paused.");
       }
 
-      // 3. Create offer instruction
       const contractId = createContractId("SIM", wallet.publicKey);
       instructions.push(
         buildCreateOfferIx({
@@ -241,7 +192,7 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
       setOnChainContract(account);
       setChainAction({
         state: "success",
-        message: `Offer ${contractId} created on Testnet! Transaction ${formatSignature(signature)}.`,
+        message: `Offer ${contractId} created on Testnet! Tx: ${formatSignature(signature)}.`,
       });
     } catch (error) {
       setChainAction({
@@ -251,285 +202,171 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
     }
   };
 
-  // Reset to documented baseline ($10k notional, 0.02% fixed rate, long, baseline scenario)
   const resetToDocumentedBaseline = () => {
     setPositionSide("long");
     setNotionalDollars(10000);
     setFixedRatePercent(0.02);
     setSelectedScenarioId("baseline");
+    setChainAction({ state: "idle", message: "" });
   };
 
   return (
-    <div className="dashboard-page space-y-8 max-w-5xl mx-auto pb-16 font-sans">
-      {/* 1. Hero Portfolio & Net Cost Display (Exact Image 2 Center Hero Style) */}
-      <div className="text-center space-y-3 pt-3">
-        <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-black/[0.04] dark:border-white/[0.06] text-xs font-mono text-zinc-600 dark:text-zinc-400 shadow-xs">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          <span>Local calculator preview · Binance SOL-PERP · 7-Day Cycle</span>
-        </div>
-
-        <div className="space-y-1">
-          <span className="text-xs font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-sans">
-            Target Net Funding Cost
-          </span>
-          <div className="flex items-baseline justify-center gap-2 text-5xl sm:text-6xl font-extrabold tracking-tight text-white font-sans">
-            <span>{formatCurrency(explanation.netFundingCostCents)}</span>
-            <span className="text-2xl sm:text-3xl font-light text-zinc-400">
-              USD
-            </span>
+    <div className="space-y-6 max-w-5xl mx-auto pb-16 font-sans">
+      {/* 1. Header & Position Direction Selector */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-black/[0.08] dark:border-white/[0.08]">
+        <div>
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-xs font-semibold mb-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            <span>Binance SOL-PERP · 7-Day Cycle (21 Epochs)</span>
           </div>
-          <p className="text-xs sm:text-sm text-zinc-400 font-mono">
-            Calculated locally at <strong className="text-white">+{fixedRatePercent.toFixed(4)}%</strong> per 8h • submit the offer below to write terms on Testnet
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-zinc-950 dark:text-white tracking-tight">
+            Fixed-Rate Hedge Calculator
+          </h1>
+          <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+            Lock in a guaranteed funding rate for your perpetual swap position. Eliminate unpredictable 8h fee volatility.
           </p>
         </div>
 
-        {/* 2. The Signature Action Pill Capsule (Direct from Image 2!) */}
-        <div className="pt-4 flex items-center justify-center">
-          <div className="inline-flex items-center p-1.5 rounded-full bg-zinc-950 dark:bg-zinc-900 text-white shadow-2xl shadow-black/20 border border-black/10 dark:border-white/10">
-            {/* Long Hedge Button */}
-            <button
-              type="button"
-              onClick={() => setPositionSide("long")}
-              className={`flex items-center gap-2 px-6 sm:px-7 py-2.5 rounded-full text-xs sm:text-sm font-semibold transition-all duration-200 ${
-                positionSide === "long"
-                  ? "bg-white text-zinc-950 shadow-md scale-102"
-                  : "text-zinc-400 hover:text-white"
-              }`}
-            >
-              <ArrowUpRight className="w-4 h-4" />
-              <span>Long Hedge</span>
-            </button>
-
-            {/* Central Holographic Metallic Dial (Direct from Image 2!) */}
-            <div
-              onClick={() => setPositionSide(positionSide === "long" ? "short" : "long")}
-              className="mx-1.5 h-10 w-10 rounded-full metallic-dial flex items-center justify-center cursor-pointer hover:scale-108 active:scale-95 transition-transform shadow-lg"
-              title="Toggle Long / Short Direction"
-            >
-              <Sparkles className="w-4 h-4 text-zinc-900 drop-shadow-xs" />
-            </div>
-
-            {/* Short Hedge Button */}
-            <button
-              type="button"
-              onClick={() => setPositionSide("short")}
-              className={`flex items-center gap-2 px-6 sm:px-7 py-2.5 rounded-full text-xs sm:text-sm font-semibold transition-all duration-200 ${
-                positionSide === "short"
-                  ? "bg-white text-zinc-950 shadow-md scale-102"
-                  : "text-zinc-400 hover:text-white"
-              }`}
-            >
-              <span>Short Hedge</span>
-              <ArrowDownRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="dashboard-dark-card p-4 sm:p-5 rounded-[24px] border border-white/10 space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-white">
-              <span className={`w-2 h-2 rounded-full ${marketConfig ? "bg-[#7af6a7]" : "bg-amber-400"}`} />
-              {marketConfig ? "Testnet market is live" : "Testnet market setup required"}
-            </div>
-            <p className="text-[11px] text-zinc-400 mt-1">
-              {marketConfig
-                ? `Oracle authority: ${marketConfig.oracleAuthority.toBase58().slice(0, 6)}…${marketConfig.oracleAuthority.toBase58().slice(-4)}`
-                : "The first wallet to initialize this market becomes its admin and oracle authority."}
-            </p>
-          </div>
-          {!marketConfig && (
-            <button
-              type="button"
-              onClick={handleInitializeMarket}
-              disabled={chainAction.state === "pending"}
-              className="dashboard-control disabled:opacity-50"
-            >
-              Initialize Testnet Market
-            </button>
-          )}
-        </div>
-        {onChainContract && (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] font-mono text-zinc-300">
-            <span>On-chain offer: {onChainContract.contractId}</span>
-            <span>State: {onChainContract.lifecycleLabel}</span>
-            <span>Required collateral: {lamportsToSol(onChainContract.requiredBuyerCollateral + onChainContract.requiredRiskTakerCollateral).toFixed(4)} SOL</span>
-          </div>
-        )}
-        {chainAction.message && (
-          <p className={`text-[11px] font-mono ${chainAction.state === "error" ? "text-amber-300" : chainAction.state === "success" ? "text-[#7af6a7]" : "text-zinc-300"}`}>
-            {chainAction.message}
-          </p>
-        )}
-      </div>
-
-      {/* 3. Program Escrow Solvency Vault Pill (Directly modeled on Vault Card in Image 2) */}
-      <div className="dashboard-card bg-white dark:bg-zinc-900/90 rounded-[28px] border border-black/[0.05] dark:border-white/[0.08] p-5 luxury-card space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3.5">
-            <div className="h-11 w-11 rounded-2xl bg-zinc-100 dark:bg-zinc-800 border border-black/[0.04] dark:border-white/[0.06] flex items-center justify-center text-zinc-900 dark:text-white shadow-xs">
-              <Lock className="w-5 h-5 stroke-[2]" />
-            </div>
-            <div>
-              <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 font-semibold block">
-                Solana Solvency Vault
-              </span>
-              <div className="text-xl font-bold font-mono text-zinc-950 dark:text-white flex items-center gap-2">
-                <span>{formatCurrency(explanation.requiredCollateralBuyerCents + explanation.requiredCollateralRiskTakerCents)}</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold">
-                  100% Solvency Guaranteed
-                </span>
-              </div>
-            </div>
-          </div>
-
+        {/* Position Side Toggle (Long Hedge vs Short Hedge) */}
+        <div className="p-1 rounded-full bg-zinc-100 dark:bg-zinc-800/80 border border-black/[0.06] dark:border-white/[0.08] flex items-center gap-1 self-start sm:self-center">
           <button
-            onClick={() => setShowVaultDetails(!showVaultDetails)}
-            className="flex items-center gap-2 px-4 py-2 rounded-full bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 text-xs font-semibold font-mono transition self-start sm:self-center"
+            type="button"
+            onClick={() => setPositionSide("long")}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold font-mono transition ${
+              positionSide === "long"
+                ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 shadow-xs"
+                : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"
+            }`}
           >
-            <span>{showVaultDetails ? "Hide Allocations" : "View Allocations"}</span>
-            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showVaultDetails ? "rotate-180" : ""}`} />
+            <ArrowUpRight className="w-3.5 h-3.5" />
+            <span>Long Hedge</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setPositionSide("short")}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold font-mono transition ${
+              positionSide === "short"
+                ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 shadow-xs"
+                : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"
+            }`}
+          >
+            <span>Short Hedge</span>
+            <ArrowDownRight className="w-3.5 h-3.5" />
           </button>
         </div>
-
-        {/* Collateral Breakdown Drawer */}
-        {showVaultDetails && (
-          <div className="pt-3 border-t border-black/[0.05] dark:border-white/[0.06] grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono animate-in fade-in duration-200">
-            <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-black/[0.03] dark:border-white/[0.04] space-y-1">
-              <span className="text-zinc-400 uppercase text-[10px]">Buyer Locked Margin</span>
-              <div className="text-base font-bold text-zinc-950 dark:text-white">
-                {formatCurrency(explanation.requiredCollateralBuyerCents)}
-              </div>
-              <p className="text-[10px] text-zinc-500">Max downside obligation + 5% buffer</p>
-            </div>
-
-            <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-black/[0.03] dark:border-white/[0.04] space-y-1">
-              <span className="text-zinc-400 uppercase text-[10px]">Risk-Taker Margin</span>
-              <div className="text-base font-bold text-zinc-950 dark:text-white">
-                {formatCurrency(explanation.requiredCollateralRiskTakerCents)}
-              </div>
-              <p className="text-[10px] text-zinc-500">Full buyer payout coverage + 5% buffer</p>
-            </div>
-
-            <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-black/[0.03] dark:border-white/[0.04] space-y-1">
-              <span className="text-zinc-400 uppercase text-[10px]">Guaranteed Payout Cap</span>
-              <div className="text-base font-bold text-zinc-950 dark:text-white">
-                {formatCurrency(explanation.payoutCapCents)}
-              </div>
-              <p className="text-[10px] text-zinc-500">Rate Bounds: [-0.50%, +0.50%]</p>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* 4. Two Sculpted Core Cards Side-by-Side (Matching Image 2's Solana SOL & Tether USDT cards!) */}
+      {/* 2. Hero Target Outcome Banner */}
+      <div className="p-6 sm:p-7 rounded-[28px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/[0.08] shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 font-bold block">
+            Target Net Funding Expense
+          </span>
+          <div className="flex items-baseline gap-2 mt-1">
+            <span className="text-4xl sm:text-5xl font-extrabold text-zinc-950 dark:text-white tracking-tight font-mono">
+              {formatCurrency(explanation.netFundingCostCents)}
+            </span>
+            <span className="text-base sm:text-lg font-mono text-zinc-400">USD</span>
+          </div>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 font-mono mt-1">
+            Fixed at <strong className="text-zinc-950 dark:text-white">{fixedRatePercent > 0 ? `+${fixedRatePercent.toFixed(4)}%` : `${fixedRatePercent.toFixed(4)}%`}</strong> per 8h · Exactly $42.00 on $10k notional
+          </p>
+        </div>
+
+        <div className="flex flex-col sm:items-end gap-2 text-xs font-mono">
+          <div className="px-3 py-1.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold border border-emerald-500/20">
+            0.00% Net Variance Guaranteed
+          </div>
+          <span className="text-zinc-500 text-[11px]">
+            Single net payout settles at cycle maturity
+          </span>
+        </div>
+      </div>
+
+      {/* 3. Two Core Cards Side-by-Side: Hedge Setup & Cash Flow Comparison */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Card 1: Solana SOL-PERP Exposure & Parameters (Exact visual match to Image 2's Solana Card) */}
-        <div className="dashboard-card bg-white dark:bg-zinc-900/90 rounded-[32px] border border-black/[0.05] dark:border-white/[0.08] p-6 luxury-card flex flex-col justify-between space-y-6">
-          <div className="space-y-5">
-            {/* Card Header (Icon, Title & Menu) */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-zinc-950 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+        {/* Card 1: Hedge Setup & Parameters */}
+        <div className="p-6 rounded-[28px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/[0.08] shadow-sm space-y-5 flex flex-col justify-between">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-black/[0.06] dark:border-white/[0.06]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 flex items-center justify-center font-bold text-xs">
                   ◎
                 </div>
                 <div>
-                  <h3 className="font-bold text-base text-zinc-950 dark:text-white">
-                    SOL-PERP Position
+                  <h3 className="font-bold text-sm text-zinc-950 dark:text-white">
+                    Perpetual Position Exposure
                   </h3>
-                  <span className="text-[11px] text-zinc-400 font-mono">Binance Futures</span>
+                  <span className="text-[10px] text-zinc-400 font-mono">Binance SOL-PERP</span>
                 </div>
               </div>
 
-              <div className="relative">
-                <button
-                  onClick={() => setParamMenuOpen(!paramMenuOpen)}
-                  className="h-8 w-8 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition"
-                >
-                  <MoreHorizontal className="w-4 h-4" />
-                </button>
-                {paramMenuOpen && (
-                  <div className="absolute right-0 mt-2 w-48 rounded-2xl bg-white dark:bg-zinc-850 border border-black/[0.08] dark:border-white/[0.1] shadow-xl p-2 z-30 font-mono text-xs animate-in fade-in duration-150">
-                    <button
-                      onClick={() => {
-                        resetToDocumentedBaseline();
-                        setParamMenuOpen(false);
-                      }}
-                      className="w-full text-left px-3 py-1.5 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-750 text-zinc-700 dark:text-zinc-300"
-                    >
-                      Reset Baseline ($42 Net)
-                    </button>
-                    <div className="px-3 py-1.5 text-zinc-400 text-[10px]">
-                      Duration: 7 Days (21 Epochs)
-                    </div>
-                  </div>
-                )}
-              </div>
+              <button
+                type="button"
+                onClick={resetToDocumentedBaseline}
+                className="flex items-center gap-1 text-[11px] font-mono text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition"
+                title="Reset to baseline"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Reset</span>
+              </button>
             </div>
 
-            {/* Primary Value Display (Matching Image 2: Bold Number + Subtitle) */}
-            <div className="space-y-0.5">
-              <div className="text-3xl sm:text-4xl font-extrabold text-zinc-950 dark:text-white font-mono">
-                ${notionalDollars.toLocaleString()} <span className="text-xl sm:text-2xl font-normal text-zinc-400">USD</span>
-              </div>
-              <p className="text-xs text-zinc-500 font-mono">
-                Target Fixed Rate: <strong className="text-zinc-900 dark:text-white">{fixedRatePercent > 0 ? `+${fixedRatePercent.toFixed(4)}%` : `${fixedRatePercent.toFixed(4)}%`}</strong> per 8h
-              </p>
-            </div>
-
-            {/* Interactive Slider & Stepper */}
-            <div className="space-y-2.5 pt-1">
+            {/* Notional Exposure Slider & Presets */}
+            <div className="space-y-2">
               <div className="flex items-center justify-between text-xs font-mono">
-                <span className="text-zinc-500">Notional Size</span>
-                <span className="font-bold text-zinc-900 dark:text-white">${notionalDollars.toLocaleString()} USD</span>
+                <span className="text-zinc-500 font-medium">Hedged Notional Size:</span>
+                <span className="font-bold text-zinc-950 dark:text-white text-sm">
+                  ${notionalDollars.toLocaleString()} USD
+                </span>
               </div>
               <input
                 type="range"
-                min="1000"
-                max="100000"
-                step="1000"
+                min="500"
+                max="50000"
+                step="500"
                 value={notionalDollars}
                 onChange={(e) => setNotionalDollars(Number(e.target.value))}
-                className="w-full accent-zinc-950 dark:accent-white bg-zinc-200 dark:bg-zinc-800 h-2 rounded-full appearance-none cursor-pointer"
+                className="w-full accent-emerald-500 h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full appearance-none cursor-pointer"
               />
-              {/* Quick Size Chips */}
-              <div className="flex items-center gap-1.5 text-xs font-mono">
-                {[5000, 10000, 25000, 50000, 100000].map((amt) => (
+              <div className="flex items-center gap-1.5 text-xs font-mono pt-0.5">
+                {[1000, 5000, 10000, 25000].map((amt) => (
                   <button
                     key={amt}
                     type="button"
                     onClick={() => setNotionalDollars(amt)}
-                    className={`flex-1 py-1 rounded-full text-[11px] transition font-medium ${
+                    className={`flex-1 py-1 rounded-full text-[11px] transition font-semibold ${
                       notionalDollars === amt
-                        ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 font-bold shadow-xs"
+                        ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 shadow-xs"
                         : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"
                     }`}
                   >
-                    ${amt / 1000}k
+                    ${amt >= 1000 ? `${amt / 1000}k` : amt}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Target Rate Input & Chips */}
+            {/* Target Rate Input & Presets */}
             <div className="space-y-2 pt-1">
               <div className="flex items-center justify-between text-xs font-mono">
-                <span className="text-zinc-500">Target Fixed Rate</span>
-                <span className="font-bold text-zinc-900 dark:text-white">
-                  {fixedRatePercent > 0 ? `+${fixedRatePercent.toFixed(4)}%` : `${fixedRatePercent.toFixed(4)}%`}
+                <span className="text-zinc-500 font-medium">Target Fixed Rate:</span>
+                <span className="font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                  {fixedRatePercent > 0 ? `+${fixedRatePercent.toFixed(4)}%` : `${fixedRatePercent.toFixed(4)}%`} / 8h
                 </span>
               </div>
-              <input
-                type="number"
-                step="0.005"
-                min="-0.50"
-                max="0.50"
-                value={fixedRatePercent}
-                onChange={(e) => setFixedRatePercent(Number(e.target.value))}
-                className="w-full px-4 py-2 rounded-2xl bg-zinc-50 dark:bg-zinc-800/80 border border-black/[0.05] dark:border-white/[0.08] text-xs font-mono font-bold text-zinc-950 dark:text-white focus:outline-none focus:ring-2 focus:ring-black/10 dark:focus:ring-white/20"
-              />
-              <div className="flex items-center gap-1.5 text-xs font-mono">
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  step="0.005"
+                  min="-0.50"
+                  max="0.50"
+                  value={fixedRatePercent}
+                  onChange={(e) => setFixedRatePercent(Number(e.target.value))}
+                  className="flex-1 px-3.5 py-2 rounded-xl bg-zinc-50 dark:bg-zinc-800 border border-black/[0.08] dark:border-white/[0.08] text-xs font-mono font-bold text-zinc-950 dark:text-white"
+                />
+              </div>
+              <div className="flex items-center gap-1.5 text-xs font-mono pt-0.5">
                 {[
                   { label: "+0.01%", val: 0.01 },
                   { label: "+0.02%", val: 0.02 },
@@ -540,9 +377,9 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
                     key={chip.label}
                     type="button"
                     onClick={() => setFixedRatePercent(chip.val)}
-                    className={`flex-1 py-1 rounded-full text-[10px] transition ${
+                    className={`flex-1 py-1 rounded-full text-[10px] transition font-semibold ${
                       Math.abs(fixedRatePercent - chip.val) < 0.0001
-                        ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 font-bold shadow-xs"
+                        ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 shadow-xs"
                         : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"
                     }`}
                   >
@@ -552,12 +389,12 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
               </div>
             </div>
 
-            {/* Scenario Preset Selector */}
+            {/* Market Scenario Presets */}
             <div className="space-y-1.5 pt-1">
-              <span className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
-                Local Scenario Preset
+              <span className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 font-mono">
+                Market Scenario Simulation:
               </span>
-              <div className="grid grid-cols-2 gap-1.5 text-xs">
+              <div className="grid grid-cols-2 gap-2 text-xs">
                 {Object.values(DEMO_SCENARIOS).map((sc) => {
                   const isSelected = selectedScenarioId === sc.id && !customObservations;
                   return (
@@ -584,141 +421,119 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
               </div>
             </div>
           </div>
-
-          {/* Bottom Action Button (Matching Image 2's "Add to Vault" style button) */}
-          <div className="pt-2">
-            <button
-              onClick={resetToDocumentedBaseline}
-              className="w-full py-3 rounded-2xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 text-xs font-semibold flex items-center justify-center gap-2 transition"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Reset Baseline ($42 Net)</span>
-            </button>
-          </div>
         </div>
 
-        {/* Card 2: Native SOL Settlement & Solvency */}
-        <div className="dashboard-card bg-white dark:bg-zinc-900/90 rounded-[32px] border border-black/[0.05] dark:border-white/[0.08] p-6 luxury-card flex flex-col justify-between space-y-6">
-          <div className="space-y-5">
-            {/* Card Header (Icon, Title & Menu) */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+        {/* Card 2: Cash Flow Comparison & Solvency Vault */}
+        <div className="p-6 rounded-[28px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/[0.08] shadow-sm space-y-5 flex flex-col justify-between">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-black/[0.06] dark:border-white/[0.06]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold text-xs">
                   $
                 </div>
                 <div>
-                  <h3 className="font-bold text-base text-zinc-950 dark:text-white">
-                    SOL Settlement
+                  <h3 className="font-bold text-sm text-zinc-950 dark:text-white">
+                    Cash Flow Normalization
                   </h3>
-                    <span className="text-[11px] text-zinc-400 font-mono">Native SOL Escrow Vault</span>
+                  <span className="text-[10px] text-zinc-400 font-mono">Solana Escrow Offset</span>
                 </div>
               </div>
 
-              <div className="relative">
-                <button
-                  onClick={() => setSettlementMenuOpen(!settlementMenuOpen)}
-                  className="h-8 w-8 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition"
-                >
-                  <MoreHorizontal className="w-4 h-4" />
-                </button>
-                {settlementMenuOpen && (
-                  <div className="absolute right-0 mt-2 w-48 rounded-2xl bg-white dark:bg-zinc-850 border border-black/[0.08] dark:border-white/[0.1] shadow-xl p-2 z-30 font-mono text-xs animate-in fade-in duration-150">
-                    <div className="px-3 py-1.5 text-zinc-700 dark:text-zinc-300 font-semibold">
-                      Settlement at Maturity
-                    </div>
-                    <div className="px-3 py-1 text-zinc-400 text-[10px]">
-                      Single Net Payout
-                    </div>
-                  </div>
-                )}
-              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold">
+                100% Solvency
+              </span>
             </div>
 
-            {/* Primary Value Display (Matching Image 2: Bold Number + Subtitle) */}
-            <div className="space-y-0.5">
-              <div className="text-3xl sm:text-4xl font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">
-                {formatCurrency(explanation.totalSettlementCents, true)}
-              </div>
-              <p className="text-xs text-zinc-500 font-mono">
-                Maturity Settlement Payout (Offsetting Venue Expense)
-              </p>
-            </div>
-
-            {/* Comparative Breakdown Visual Blocks */}
-            <div className="space-y-2.5 pt-1 font-mono text-xs">
-              <div className="p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-800/40 border border-black/[0.04] dark:border-white/[0.04] flex items-center justify-between">
+            {/* Comparison Metrics */}
+            <div className="space-y-2.5 font-mono text-xs">
+              <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/40 border border-black/[0.04] dark:border-white/[0.04] flex items-center justify-between">
                 <div>
-                  <span className="text-[10px] text-zinc-400 uppercase block">Unhedged Venue Cost</span>
-                  <span className="font-bold text-zinc-900 dark:text-white">
+                  <span className="text-[10px] text-zinc-400 uppercase block">1. Unhedged Binance Expense</span>
+                  <span className="font-bold text-zinc-950 dark:text-white text-sm">
                     {formatCurrency(explanation.totalActualFundingCostCents)}
                   </span>
                 </div>
-                <span className="text-[11px] text-zinc-400">Paid on Binance</span>
+                <span className="text-[11px] text-zinc-500">Paid to Exchange</span>
               </div>
 
-              <div className="p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-800/40 border border-black/[0.04] dark:border-white/[0.04] flex items-center justify-between">
+              <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/40 border border-black/[0.04] dark:border-white/[0.04] flex items-center justify-between">
                 <div>
-                  <span className="text-[10px] text-zinc-400 uppercase block">FundingLock Net Payout</span>
-                  <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                  <span className="text-[10px] text-zinc-400 uppercase block">2. FundingLock Net Offset</span>
+                  <span className="font-bold text-emerald-600 dark:text-emerald-400 text-sm">
                     {formatCurrency(explanation.totalSettlementCents, true)}
                   </span>
                 </div>
-                <span className="text-[11px] text-emerald-600 dark:text-emerald-400">Offset Credit</span>
+                <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">Maturity Credit</span>
               </div>
 
-              <div className="p-3.5 rounded-2xl bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 flex items-center justify-between shadow-sm">
+              <div className="p-4 rounded-2xl bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 flex items-center justify-between shadow-xs">
                 <div>
-                  <span className="text-[10px] text-zinc-400 dark:text-zinc-600 uppercase block font-bold">
-                    Net Fixed Expense
+                  <span className="text-[10px] text-zinc-400 dark:text-zinc-600 uppercase font-bold block">
+                    = Net Guaranteed Cost
                   </span>
-                  <span className="text-base font-extrabold">
+                  <span className="text-lg font-extrabold">
                     {formatCurrency(explanation.netFundingCostCents)}
                   </span>
                 </div>
-                <span className="text-[11px] font-bold">0.00% Variance</span>
+                <div className="text-right">
+                  <span className="text-[10px] text-emerald-400 dark:text-emerald-600 font-bold block uppercase">
+                    Zero Volatility
+                  </span>
+                  <span className="text-[11px] font-semibold">Target Achieved</span>
+                </div>
               </div>
             </div>
 
-            {/* Solvency Checklist */}
-            <div className="space-y-1.5 pt-1 text-[11px] text-zinc-500 font-sans">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                <span>100% Solvency Ratio sized from rate bounds</span>
+            {/* Vault Collateral Sizing Summary */}
+            <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/40 border border-black/[0.04] dark:border-white/[0.04] space-y-2 text-xs font-mono">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500 font-medium">Vault Collateral Required:</span>
+                <span className="font-bold text-zinc-950 dark:text-white">
+                  {formatCurrency(explanation.requiredCollateralBuyerCents + explanation.requiredCollateralRiskTakerCents)}
+                  <span className="text-[10px] font-normal text-emerald-500 ml-1">
+                    (~{((explanation.requiredCollateralBuyerCents + explanation.requiredCollateralRiskTakerCents) / 10000).toFixed(2)} SOL)
+                  </span>
+                </span>
               </div>
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                <span>Single net transfer at maturity (Zero mid-cycle leakage)</span>
+              <div className="grid grid-cols-2 gap-2 text-[11px] text-zinc-500 pt-1 border-t border-black/[0.04] dark:border-white/[0.04]">
+                <div>Buyer Margin: <strong className="text-zinc-800 dark:text-zinc-200">{formatCurrency(explanation.requiredCollateralBuyerCents)}</strong></div>
+                <div>Taker Margin: <strong className="text-zinc-800 dark:text-zinc-200">{formatCurrency(explanation.requiredCollateralRiskTakerCents)}</strong></div>
               </div>
             </div>
           </div>
 
-          {/* Bottom Action Button (Matching Image 2's "Add to Vault" style button) */}
-          <div className="pt-2">
+          {/* Action Button: Post Offer on Solana Testnet */}
+          <div className="pt-2 space-y-2">
             <button
               type="button"
               onClick={handleCreateOfferOnChain}
               disabled={chainAction.state === "pending"}
-              className="w-full py-3 rounded-2xl bg-[#7af6a7] hover:bg-[#99f9ba] text-zinc-950 text-xs font-semibold flex items-center justify-center gap-2 shadow-md transition"
+              className="w-full py-3 px-4 rounded-full bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-semibold font-mono flex items-center justify-center gap-2 shadow-md active:scale-98 transition disabled:opacity-50"
             >
               <Lock className="w-3.5 h-3.5" />
               <span>
                 {chainAction.state === "pending"
-                  ? "Awaiting wallet…"
+                  ? "Awaiting Wallet Approval…"
                   : wallet.connected
-                    ? "Create Fixed-Rate Offer on Solana"
-                    : "Connect Wallet to Lock Rate"}
+                  ? "Create Fixed-Rate Offer on Solana Testnet"
+                  : "Connect Wallet to Lock Rate"}
               </span>
             </button>
+
+            {onChainContract && (
+              <div className="text-center text-[11px] font-mono text-zinc-500">
+                Created: <strong className="text-zinc-900 dark:text-zinc-100">{onChainContract.contractId}</strong> · State: <span className="text-emerald-500 font-bold">{onChainContract.lifecycleLabel}</span>
+              </div>
+            )}
+
             {chainAction.message && (
               <p
-                role="status"
-                aria-live="polite"
-                className={`mt-2 text-center text-[11px] font-mono ${
+                className={`text-center text-[11px] font-mono ${
                   chainAction.state === "error"
-                    ? "text-amber-700 dark:text-amber-300"
+                    ? "text-amber-600 dark:text-amber-400"
                     : chainAction.state === "success"
-                      ? "text-emerald-700 dark:text-emerald-300"
-                      : "text-zinc-500 dark:text-zinc-400"
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-zinc-500"
                 }`}
               >
                 {chainAction.message}
@@ -728,82 +543,54 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
         </div>
       </div>
 
-      {/* 5. 21-Interval Accounting Ledger (Activity / Transaction History in Image 2 Style) */}
-      <div className="dashboard-card bg-white dark:bg-zinc-900/90 rounded-[32px] border border-black/[0.05] dark:border-white/[0.08] p-6 luxury-card space-y-4">
-        <div className="flex items-center justify-between border-b border-black/[0.05] dark:border-white/[0.06] pb-4">
+      {/* 4. Collapsible 21-Epoch Settlement Ledger */}
+      <div className="p-5 rounded-[28px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/[0.08] shadow-sm space-y-4">
+        <button
+          onClick={() => setShowLedger(!showLedger)}
+          className="w-full flex items-center justify-between text-left"
+        >
           <div className="flex items-center gap-2.5">
-            <h3 className="font-bold text-sm text-zinc-950 dark:text-white font-sans">
-              Epoch Settlement Ledger
+            <h3 className="font-bold text-sm text-zinc-950 dark:text-white font-mono">
+              21-Epoch Settlement Ledger
             </h3>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-black/5 dark:bg-white/10 text-zinc-600 dark:text-zinc-400 font-semibold">
-              {explanation.records.length} Epochs Recorded
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-black/[0.04] dark:bg-white/[0.08] text-zinc-600 dark:text-zinc-400 font-semibold">
+              {explanation.records.length} Epochs
             </span>
           </div>
-          <span className="text-[11px] font-mono text-zinc-400 hidden sm:inline">
-            Single Net Payout at Maturity • 0% Mid-Cycle Leakage
-          </span>
-        </div>
 
-        {/* Missing Observation Warning */}
-        {explanation.missingObservationsCount > 0 && (
-          <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-3 text-xs text-amber-800 dark:text-amber-200">
-            <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-            <div>
-              <strong className="font-bold">Missing Oracle Observation Detected</strong>
-              <p className="text-[11px] text-amber-700 dark:text-amber-300/80 mt-0.5">
-                Interval #14 was not published. Protocol stops finalization until all consecutive epochs are verified.
-              </p>
+          <div className="flex items-center gap-2 text-xs font-mono text-zinc-500">
+            <span>{showLedger ? "Hide Ledger" : "Show Epoch Breakdown"}</span>
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showLedger ? "rotate-180" : ""}`} />
+          </div>
+        </button>
+
+        {showLedger && (
+          <div className="space-y-2 pt-2 border-t border-black/[0.06] dark:border-white/[0.06] animate-in fade-in duration-150">
+            <div className="max-h-72 overflow-y-auto space-y-1.5 pr-1 font-mono text-xs">
+              {explanation.records.map((rec) => (
+                <div
+                  key={rec.intervalIndex}
+                  className="flex items-center justify-between p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 border border-black/[0.03] dark:border-white/[0.04]"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="font-bold text-zinc-950 dark:text-white">#{rec.intervalIndex}</span>
+                    <span className="text-[11px] text-zinc-500">
+                      Rate: <strong className="text-zinc-800 dark:text-zinc-200">{formatRatePercent(rec.realizedRatePpm)}</strong>
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                      {formatCurrency(rec.intervalSettlementCents, true)}
+                    </span>
+                    <span className="text-[10px] text-zinc-400 ml-2">
+                      Cum: {formatCurrency(rec.cumulativeSettlementCents, true)}
+                    </span>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
-
-        {/* Scrollable Rows */}
-        <div className="overflow-x-auto max-h-88 overflow-y-auto space-y-2 pr-1 no-scrollbar">
-          {explanation.records.map((rec) => {
-            const isMissing = rec.status === "missing";
-            return (
-              <div
-                key={rec.intervalIndex}
-                className={`flex items-center justify-between p-3.5 rounded-2xl border transition-all ${
-                  isMissing
-                    ? "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400"
-                    : "bg-zinc-50/70 dark:bg-zinc-800/40 border-black/[0.03] dark:border-white/[0.04] hover:border-black/10 dark:hover:border-white/10"
-                }`}
-              >
-                {/* Left: Epoch Number & Time */}
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-white dark:bg-zinc-800 border border-black/[0.04] dark:border-white/[0.06] flex items-center justify-center font-mono text-xs font-bold text-zinc-950 dark:text-white shadow-2xs">
-                    #{rec.intervalIndex}
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold text-zinc-950 dark:text-white font-mono">
-                      {new Date(rec.startTime * 1000).toLocaleString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        timeZone: "UTC",
-                      })}
-                    </div>
-                    <div className="text-[10px] font-mono text-zinc-400">
-                      {isMissing ? "Observation Missing" : `Realized Rate: ${formatRatePercent(rec.realizedRatePpm)}`}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Right: Interval Settlement & Cumulative */}
-                <div className="text-right font-mono">
-                  <div className="text-xs font-bold text-zinc-950 dark:text-white">
-                    {isMissing ? "HALTED" : formatCurrency(rec.intervalSettlementCents, true)}
-                  </div>
-                  <div className="text-[10px] text-zinc-400">
-                    Cum: <strong className="text-zinc-700 dark:text-zinc-300">{formatCurrency(rec.cumulativeSettlementCents, true)}</strong>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
       </div>
     </div>
   );

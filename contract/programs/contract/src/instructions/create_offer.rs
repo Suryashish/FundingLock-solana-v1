@@ -83,7 +83,13 @@ pub fn handle_create_offer(
     contract.submitted_observations_count = 0;
     contract.lifecycle_state = ContractState::Open as u8;
     contract.bump = ctx.bumps.contract_account;
-    contract.vault_bump = 0;
+
+    let contract_key = contract.key();
+    let (_, vault_bump) = Pubkey::find_program_address(
+        &[crate::constants::VAULT_SEED, contract_key.as_ref()],
+        ctx.program_id,
+    );
+    contract.vault_bump = vault_bump;
 
     msg!("Offer created: notional=${}, required_buyer={} lamports, required_taker={} lamports",
         notional_cents / 100, contract.required_buyer_collateral, contract.required_risk_taker_collateral);

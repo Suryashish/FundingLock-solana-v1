@@ -13,6 +13,9 @@ import {
   getContractPda,
   getMarketConfigPda,
   getObservationPda,
+  readU16LE,
+  readU64LE,
+  readI64LE,
 } from './client.ts';
 
 export interface WalletTransactionSigner {
@@ -22,6 +25,7 @@ export interface WalletTransactionSigner {
     connection: Connection,
     options?: SendOptions
   ) => Promise<TransactionSignature>;
+  signTransaction?: (transaction: Transaction) => Promise<Transaction>;
 }
 
 export type OnChainContractState = {
@@ -92,16 +96,16 @@ const ACCOUNT_DISCRIMINATORS = {
   ObservationRecord: Buffer.from([80, 224, 178, 152, 235, 70, 104, 11]),
 } as const;
 
-function readU16(data: Buffer, offset: number): number {
-  return data.readUInt16LE(offset);
+function readU16(data: Uint8Array, offset: number): number {
+  return readU16LE(data, offset);
 }
 
-function readU64(data: Buffer, offset: number): bigint {
-  return data.readBigUInt64LE(offset);
+function readU64(data: Uint8Array, offset: number): bigint {
+  return readU64LE(data, offset);
 }
 
-function readI64(data: Buffer, offset: number): bigint {
-  return data.readBigInt64LE(offset);
+function readI64(data: Uint8Array, offset: number): bigint {
+  return readI64LE(data, offset);
 }
 
 function readPubkey(data: Buffer, offset: number): PublicKey {
@@ -186,10 +190,46 @@ export async function simulateAndSendTransaction(params: {
     );
   }
 
-  const signature = await wallet.sendTransaction(transaction, connection, {
-    preflightCommitment: 'confirmed',
-    maxRetries: 3,
-  });
+  let signature: TransactionSignature;
+
+  try {
+    if (wallet.signTransaction) {
+      // Preferred path: Sign via the wallet and broadcast directly through our configured
+      // connection. This avoids wallet extensions (e.g. Phantom) routing through their own
+      // internal RPC when on Testnet.
+      const signedTransaction = await wallet.signTransaction(transaction);
+      const rawTransaction = signedTransaction.serialize();
+      signature = await connection.sendRawTransaction(rawTransaction, {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+        maxRetries: 3,
+      });
+    } else {
+      signature = await wallet.sendTransaction(transaction, connection, {
+        preflightCommitment: 'confirmed',
+        maxRetries: 3,
+      });
+    }
+  } catch (sendError: unknown) {
+    const err = sendError as {
+      message?: string;
+      error?: { message?: string };
+      cause?: { message?: string };
+    };
+    const detail =
+      err?.error?.message ||
+      err?.cause?.message ||
+      err?.message ||
+      String(sendError);
+
+    if (
+      detail.toLowerCase().includes('user rejected') ||
+      detail.toLowerCase().includes('cancelled')
+    ) {
+      throw new Error('Transaction rejected in wallet.');
+    }
+    throw new Error(`Wallet transaction submission failed: ${detail}`);
+  }
 
   await connection.confirmTransaction(
     {

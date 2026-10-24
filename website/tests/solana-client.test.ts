@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { PublicKey } from '@solana/web3.js';
+import { Keypair, PublicKey } from '@solana/web3.js';
 import {
+  buildAcceptOfferIx,
+  buildActivateContractIx,
+  buildCancelOfferIx,
   buildCreateOfferIx,
+  buildDepositCollateralIx,
+  buildFinalizeContractIx,
   buildInitializeMarketIx,
+  buildRecordObservationIx,
   getContractPda,
   getInstructionDiscriminator,
 } from '../lib/solana/client.ts';
@@ -58,4 +64,86 @@ test('creates a unique contract id that fits the on-chain 16-byte field', () => 
 
   assert.ok(contractId.length <= 16);
   assert.notEqual(address.toBase58(), PublicKey.default.toBase58());
+});
+
+test('builds accept offer, deposit, activate, observation, finalize and cancel instructions', () => {
+  const buyer = Keypair.generate().publicKey;
+  const riskTaker = Keypair.generate().publicKey;
+  const [contractPda] = getContractPda('FL-TEST-001');
+  const [vaultPda] = getContractPda('FL-VAULT-001');
+  const [marketConfigPda] = getContractPda('SOL-PERP');
+
+  // Accept offer
+  const acceptIx = buildAcceptOfferIx({ contractPda, riskTaker });
+  assert.equal(acceptIx.keys.length, 2);
+  assert.deepEqual(
+    [...acceptIx.data],
+    [...getInstructionDiscriminator('acceptOffer')]
+  );
+
+  // Deposit collateral
+  const depositIx = buildDepositCollateralIx({
+    contractPda,
+    vaultPda,
+    depositor: buyer,
+    amountLamports: 1_000_000_000,
+  });
+  assert.equal(depositIx.keys.length, 4);
+  assert.deepEqual(
+    [...depositIx.data.subarray(0, 8)],
+    [...getInstructionDiscriminator('depositCollateral')]
+  );
+
+  // Activate contract
+  const activateIx = buildActivateContractIx({
+    contractPda,
+    marketConfigPda,
+    authority: buyer,
+  });
+  assert.equal(activateIx.keys.length, 3);
+  assert.deepEqual(
+    [...activateIx.data],
+    [...getInstructionDiscriminator('activateContract')]
+  );
+
+  // Record funding observation
+  const obsIx = buildRecordObservationIx({
+    contractPda,
+    marketConfigPda,
+    oracleAuthority: riskTaker,
+    intervalIndex: 0,
+    realizedRatePpm: 1000,
+    recordedAt: 1790812800,
+  });
+  assert.equal(obsIx.keys.length, 5);
+  assert.deepEqual(
+    [...obsIx.data.subarray(0, 8)],
+    [...getInstructionDiscriminator('recordFundingObservation')]
+  );
+
+  // Finalize contract
+  const finalizeIx = buildFinalizeContractIx({
+    contractPda,
+    vaultPda,
+    buyer,
+    riskTaker,
+    caller: buyer,
+  });
+  assert.equal(finalizeIx.keys.length, 6);
+  assert.deepEqual(
+    [...finalizeIx.data],
+    [...getInstructionDiscriminator('finalizeContract')]
+  );
+
+  // Cancel offer
+  const cancelIx = buildCancelOfferIx({
+    contractPda,
+    vaultPda,
+    buyer,
+  });
+  assert.equal(cancelIx.keys.length, 4);
+  assert.deepEqual(
+    [...cancelIx.data],
+    [...getInstructionDiscriminator('cancelUnmatchedOffer')]
+  );
 });

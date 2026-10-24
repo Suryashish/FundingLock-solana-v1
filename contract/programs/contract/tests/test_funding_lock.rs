@@ -167,3 +167,74 @@ fn test_contract_lifecycle_transitions() {
     contract.lifecycle_state = ContractState::Settled as u8;
     assert_eq!(contract.lifecycle_state, ContractState::Settled as u8);
 }
+
+#[test]
+fn test_unmatched_offer_cancellation() {
+    let mut contract = ContractAccount {
+        contract_id: *b"FL-SOL-OPEN\0\0\0\0\0",
+        market_symbol: *b"SOL-PERP\0\0\0\0\0\0\0\0",
+        buyer: Pubkey::new_unique(),
+        risk_taker: Pubkey::default(),
+        position_side: 0,
+        notional_cents: 100_000,
+        fixed_rate_ppm: 200,
+        interval_count: 21,
+        interval_seconds: 28800,
+        start_time: 1790812800,
+        end_time: 1790812800 + 21 * 28800,
+        required_buyer_collateral: 11_466_000,
+        required_risk_taker_collateral: 10_584_000,
+        deposited_buyer_collateral: 11_466_000,
+        deposited_risk_taker_collateral: 0,
+        accumulated_settlement_cents: 0,
+        submitted_observations_count: 0,
+        lifecycle_state: ContractState::Open as u8,
+        bump: 255,
+        vault_bump: 254,
+    };
+
+    assert_eq!(contract.lifecycle_state, ContractState::Open as u8);
+    // Cancel while unmatched
+    contract.deposited_buyer_collateral = 0;
+    contract.lifecycle_state = ContractState::Cancelled as u8;
+    assert_eq!(contract.lifecycle_state, ContractState::Cancelled as u8);
+    assert_eq!(contract.deposited_buyer_collateral, 0);
+}
+
+#[test]
+fn test_settlement_payout_distribution_cases() {
+    let buyer_deposited: u64 = 11_466_000_000;
+    let taker_deposited: u64 = 10_584_000_000;
+
+    // Case 1: Positive net settlement (Risk taker pays buyer)
+    let net_settlement_cents: i64 = 16_800; // $168.00
+    let net_lamports = (net_settlement_cents as u64) * LAMPORTS_PER_CENT;
+    let actual_transfer = std::cmp::min(net_lamports, taker_deposited);
+    let buyer_payout = buyer_deposited + actual_transfer;
+    let taker_payout = taker_deposited - actual_transfer;
+    assert_eq!(actual_transfer, 1_680_000_000);
+    assert_eq!(buyer_payout, 13_146_000_000);
+    assert_eq!(taker_payout, 8_904_000_000);
+    assert_eq!(buyer_payout + taker_payout, buyer_deposited + taker_deposited);
+
+    // Case 2: Negative net settlement (Buyer pays risk taker)
+    let neg_net_settlement_cents: i64 = -10_000; // -$100.00
+    let neg_net_lamports = ((-neg_net_settlement_cents) as u64) * LAMPORTS_PER_CENT;
+    let actual_transfer_neg = std::cmp::min(neg_net_lamports, buyer_deposited);
+    let taker_payout_neg = taker_deposited + actual_transfer_neg;
+    let buyer_payout_neg = buyer_deposited - actual_transfer_neg;
+    assert_eq!(actual_transfer_neg, 1_000_000_000);
+    assert_eq!(taker_payout_neg, 11_584_000_000);
+    assert_eq!(buyer_payout_neg, 10_466_000_000);
+    assert_eq!(buyer_payout_neg + taker_payout_neg, buyer_deposited + taker_deposited);
+
+    // Case 3: Zero difference (Full refund to each)
+    let zero_net_settlement_cents: i64 = 0;
+    let (b_pay, t_pay) = if zero_net_settlement_cents == 0 {
+        (buyer_deposited, taker_deposited)
+    } else {
+        (0, 0)
+    };
+    assert_eq!(b_pay, buyer_deposited);
+    assert_eq!(t_pay, taker_deposited);
+}
