@@ -336,7 +336,7 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
 
         <button
           onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-semibold font-mono shadow-md active:scale-98 transition self-start sm:self-center"
+          className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#74f89d] hover:bg-[#5df68b] text-zinc-950 text-xs font-bold font-mono shadow-md active:scale-98 transition self-start sm:self-center"
         >
           <Plus className="w-4 h-4" />
           <span>Post New Offer</span>
@@ -586,7 +586,7 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-full bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-semibold font-mono shadow-sm transition"
+                  className="px-5 py-2 rounded-full bg-[#74f89d] hover:bg-[#5df68b] text-zinc-950 text-xs font-bold font-mono shadow-sm transition"
                 >
                   Publish Offer
                 </button>

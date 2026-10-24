@@ -90,7 +90,7 @@ export const HistoricalDashboard: React.FC<HistoricalDashboardProps> = ({
 
           <button
             onClick={() => onSimulateHistorical(filteredObservations)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-semibold font-mono shadow-md active:scale-98 transition"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#74f89d] hover:bg-[#5df68b] text-zinc-950 text-xs font-bold font-mono shadow-md active:scale-98 transition"
           >
             <Play className="w-3.5 h-3.5" />
             <span>Load into Calculator</span>

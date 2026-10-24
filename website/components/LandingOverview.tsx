@@ -13,8 +13,8 @@ export const LandingOverview: React.FC<LandingOverviewProps> = ({ onNavigate }) 
     <div className="space-y-8 max-w-5xl mx-auto pb-16 font-sans">
       {/* Hero Section */}
       <div className="text-center space-y-4 pt-4 pb-2">
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-mono font-semibold">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#74f89d]/15 text-emerald-800 dark:text-[#74f89d] border border-[#74f89d]/30 text-xs font-mono font-semibold">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#74f89d]" />
           <span>Solana Testnet Prototype • Binance SOL-PERP (8h Epochs)</span>
         </div>
         <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-zinc-950 dark:text-white max-w-2xl mx-auto leading-tight">
@@ -26,17 +26,17 @@ export const LandingOverview: React.FC<LandingOverviewProps> = ({ onNavigate }) 
         <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
           <button
             onClick={() => onNavigate("simulator")}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-xs sm:text-sm font-semibold shadow-md hover:opacity-90 active:scale-98 transition"
+            className="flex items-center gap-2 px-6 py-3.5 rounded-full bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-xs sm:text-sm font-bold shadow-md hover:opacity-90 active:scale-98 transition"
           >
             <span>Launch Funding Simulator</span>
             <ArrowRight className="w-4 h-4" />
           </button>
           <button
             onClick={() => onNavigate("replay")}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 text-xs sm:text-sm font-semibold transition"
+            className="flex items-center gap-2 px-6 py-3.5 rounded-full bg-[#74f89d] hover:bg-[#5df68b] text-zinc-950 text-xs sm:text-sm font-bold transition shadow-sm"
           >
             <span>Run 7-Day Guided Replay</span>
-            <ArrowUpRight className="w-4 h-4 text-zinc-400" />
+            <ArrowUpRight className="w-4 h-4 text-zinc-950" />
           </button>
         </div>
       </div>

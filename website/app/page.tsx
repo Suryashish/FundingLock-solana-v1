@@ -71,7 +71,10 @@ export default function Home() {
             }`}
           >
             {activeTab === "simulator" && (
-              <HedgeSimulator customObservations={customObservations} />
+              <HedgeSimulator
+                customObservations={customObservations}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+              />
             )}
 
             {activeTab === "historical" && (

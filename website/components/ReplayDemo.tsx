@@ -541,7 +541,7 @@ export const ReplayDemo: React.FC = () => {
               }}
               className={`px-3 py-1.5 rounded-full transition ${
                 executionMode === "onchain"
-                  ? "bg-emerald-500 text-zinc-950 font-bold shadow-xs"
+                  ? "bg-[#74f89d] text-zinc-950 font-bold shadow-xs"
                   : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"
               }`}
             >
@@ -579,8 +579,8 @@ export const ReplayDemo: React.FC = () => {
                 isCurrent
                   ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 font-bold shadow-md border-transparent"
                   : isPast
-                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 font-semibold"
-                  : "bg-white dark:bg-zinc-900 border-black/[0.06] dark:border-white/[0.08] text-zinc-400"
+                  ? "bg-[#74f89d]/15 border-[#74f89d]/40 text-emerald-800 dark:text-[#74f89d] font-semibold"
+                  : "bg-white dark:bg-[#121316] border-black/[0.1] dark:border-white/[0.1] text-zinc-400"
               }`}
             >
               <div className="flex items-center justify-between">
@@ -698,7 +698,7 @@ export const ReplayDemo: React.FC = () => {
                 <button
                   onClick={handleCreateOnChainContract}
                   disabled={chainAction.state === "pending"}
-                  className="flex items-center gap-2 px-6 py-3 rounded-full bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-semibold shadow-md active:scale-98 transition disabled:opacity-50"
+                  className="flex items-center gap-2 px-6 py-3.5 rounded-full bg-[#74f89d] hover:bg-[#5df68b] text-zinc-950 text-xs font-bold shadow-md active:scale-98 transition disabled:opacity-50"
                 >
                   <Wallet className="w-4 h-4" />
                   <span>
@@ -782,7 +782,7 @@ export const ReplayDemo: React.FC = () => {
                 <button
                   onClick={handleAcceptOnChainContract}
                   disabled={chainAction.state === "pending"}
-                  className="px-5 py-2.5 rounded-full bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-semibold transition"
+                  className="px-5 py-2.5 rounded-full bg-[#74f89d] hover:bg-[#5df68b] text-zinc-950 text-xs font-bold transition"
                 >
                   Accept Offer as Risk Taker
                 </button>
@@ -1003,7 +1003,7 @@ export const ReplayDemo: React.FC = () => {
                 <button
                   onClick={handleFinalize}
                   disabled={missingObsActive}
-                  className="flex items-center gap-2 px-6 py-3 rounded-full bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-semibold shadow-md active:scale-98 transition disabled:opacity-50"
+                  className="flex items-center gap-2 px-6 py-3.5 rounded-full bg-[#74f89d] hover:bg-[#5df68b] text-zinc-950 text-xs font-bold shadow-md active:scale-98 transition disabled:opacity-50"
                 >
                   <ShieldCheck className="w-4 h-4" />
                   <span>Execute Final Settlement Payout</span>
