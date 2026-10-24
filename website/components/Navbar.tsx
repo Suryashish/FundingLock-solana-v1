@@ -162,7 +162,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: "simulator", label: "Simulator", icon: <Sparkles className="w-3.5 h-3.5" /> },
     { id: "marketplace", label: "Marketplace", icon: <Store className="w-3.5 h-3.5" /> },
     { id: "historical", label: "Historical Rates", icon: <BarChart3 className="w-3.5 h-3.5" /> },
-    { id: "replay", label: "Replay Demo", icon: <RotateCw className="w-3.5 h-3.5" /> },
+    { id: "replay", label: "Contract Flow", icon: <RotateCw className="w-3.5 h-3.5" /> },
     { id: "overview", label: "Protocol Spec", icon: <FileText className="w-3.5 h-3.5" /> },
   ];
 

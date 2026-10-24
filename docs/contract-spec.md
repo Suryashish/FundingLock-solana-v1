@@ -1,6 +1,6 @@
 # FundingLock Contract Specification
 
-**Program ID:** `78VTWQn5FdEE3vWvincjDG5cp1J7x3s8ioZzcXEMksxx`  
+**Program ID:** `HSMBzbTfQQgLKk9Bv7d9WkLiK1yvKCs9FkeGgBhgfZj9`  
 **Network:** Solana Testnet / Devnet  
 **Collateral Asset:** Native SOL (testnet) / SPL USDC
 

@@ -3,7 +3,7 @@ use crate::constants::MARKET_CONFIG_SEED;
 use crate::state::MarketConfig;
 
 #[derive(Accounts)]
-#[instruction(market_symbol: [u8; 16])]
+#[instruction(venue_id: [u8; 16], market_symbol: [u8; 16])]
 pub struct InitializeMarket<'info> {
     #[account(
         init,

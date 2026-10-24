@@ -7,13 +7,13 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-contract = "78VTWQn5FdEE3vWvincjDG5cp1J7x3s8ioZzcXEMksxx"
+contract = "HSMBzbTfQQgLKk9Bv7d9WkLiK1yvKCs9FkeGgBhgfZj9"
 
 [programs.devnet]
-contract = "78VTWQn5FdEE3vWvincjDG5cp1J7x3s8ioZzcXEMksxx"
+contract = "HSMBzbTfQQgLKk9Bv7d9WkLiK1yvKCs9FkeGgBhgfZj9"
 
 [programs.testnet]
-contract = "78VTWQn5FdEE3vWvincjDG5cp1J7x3s8ioZzcXEMksxx"
+contract = "HSMBzbTfQQgLKk9Bv7d9WkLiK1yvKCs9FkeGgBhgfZj9"
 
 [provider]
 cluster = "localnet"

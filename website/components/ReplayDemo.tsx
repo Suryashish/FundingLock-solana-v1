@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import {
   BASELINE_CONTRACT_TERMS,
   BASELINE_DOCUMENTED_OBSERVATIONS,
@@ -19,7 +20,23 @@ import {
   PROGRAM_ID,
   getContractPda,
   getVaultPda,
+  buildAcceptOfferIx,
+  buildActivateContractIx,
+  buildCreateOfferIx,
+  buildDepositCollateralIx,
+  buildFinalizeContractIx,
+  buildInitializeMarketIx,
+  buildRecordObservationIx,
 } from "../lib/solana/client.ts";
+import { TransactionInstruction } from "@solana/web3.js";
+import {
+  createContractId,
+  fetchContractAccount,
+  fetchMarketConfig,
+  formatSignature,
+  simulateAndSendTransaction,
+  type OnChainContractState,
+} from "../lib/solana/transactions.ts";
 import {
   Play,
   RotateCcw,
@@ -32,7 +49,9 @@ import {
 } from "lucide-react";
 
 export const ReplayDemo: React.FC = () => {
-  // Demo lifecycle state
+  const { connection } = useConnection();
+  const wallet = useWallet();
+  // Lifecycle state; remains local until a Testnet contract is created.
   const [step, setStep] = useState<number>(1);
   const [isPlayingAuto, setIsPlayingAuto] = useState<boolean>(false);
   const [missingObsActive, setMissingObsActive] = useState<boolean>(false);
@@ -50,9 +69,16 @@ export const ReplayDemo: React.FC = () => {
   const [publishedCount, setPublishedCount] = useState<number>(0);
   const [accumulatedSettlementCents, setAccumulatedSettlementCents] = useState<number>(0);
   const [isFinalized, setIsFinalized] = useState<boolean>(false);
+  const [onChainContractId, setOnChainContractId] = useState<string | null>(null);
+  const [onChainState, setOnChainState] = useState<OnChainContractState | null>(null);
+  const [chainAction, setChainAction] = useState<{
+    state: "idle" | "pending" | "success" | "error";
+    message: string;
+  }>({ state: "idle", message: "" });
 
   // Derived addresses
-  const [contractPda] = getContractPda(terms.contractId);
+  const activeContractId = onChainContractId ?? terms.contractId;
+  const [contractPda] = getContractPda(activeContractId);
   const [vaultPda] = getVaultPda(contractPda);
 
   // Ledger records
@@ -84,10 +110,33 @@ export const ReplayDemo: React.FC = () => {
     return list;
   }, [publishedCount, missingObsActive, terms]);
 
+  useEffect(() => {
+    if (!onChainContractId) return;
+    let active = true;
+    fetchContractAccount(connection, onChainContractId)
+      .then((account) => {
+        if (!active || !account) return;
+        setOnChainState(account);
+        setPublishedCount(account.submittedObservationsCount);
+        setAccumulatedSettlementCents(Number(account.accumulatedSettlementCents));
+        if (account.lifecycleLabel === "Settled") {
+          setIsFinalized(true);
+          setStep(6);
+        } else if (account.lifecycleLabel === "Settling" && account.submittedObservationsCount >= account.intervalCount) {
+          setStep(5);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [connection, onChainContractId]);
+
   // Handle Auto-Play
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    if (isPlayingAuto && step === 4 && publishedCount < 21) {
+    if (onChainContractId || (isPlayingAuto && step === 4 && publishedCount < 21)) {
+      if (onChainContractId) return () => undefined;
       timer = setTimeout(() => {
         setPublishedCount((prev) => {
           const next = prev + 1;
@@ -110,9 +159,122 @@ export const ReplayDemo: React.FC = () => {
       }, 250);
     }
     return () => clearTimeout(timer);
-  }, [isPlayingAuto, step, publishedCount, missingObsActive, terms]);
+  }, [isPlayingAuto, step, publishedCount, missingObsActive, terms, onChainContractId]);
 
-  // Reset entire demo
+  const runOnChainAction = async (action: () => Promise<string>, successPrefix: string) => {
+    setChainAction({ state: "pending", message: "Simulating transaction…" });
+    try {
+      const signature = await action();
+      setChainAction({ state: "success", message: `${successPrefix} Transaction ${formatSignature(signature)}.` });
+      return signature;
+    } catch (error) {
+      setChainAction({
+        state: "error",
+        message: error instanceof Error ? error.message : "Transaction failed.",
+      });
+      return null;
+    }
+  };
+
+  const refreshOnChainState = async (contractId = onChainContractId) => {
+    if (!contractId) return null;
+    const account = await fetchContractAccount(connection, contractId);
+    setOnChainState(account);
+    if (account) {
+      setPublishedCount(account.submittedObservationsCount);
+      setAccumulatedSettlementCents(Number(account.accumulatedSettlementCents));
+    }
+    return account;
+  };
+
+  const handleCreateOnChainContract = async () => {
+    if (!wallet.publicKey) {
+      setChainAction({ state: "error", message: "Connect the buyer wallet before creating the replay contract." });
+      return;
+    }
+    const lamports = await connection.getBalance(wallet.publicKey, "confirmed");
+    if (lamports < 5_000_000) {
+      setChainAction({
+        state: "error",
+        message: `Insufficient Testnet SOL (balance: ${(lamports / 1e9).toFixed(4)} SOL). You need ~0.005 SOL for transaction fees & account rent. Make sure your wallet is set to Testnet, and fund it at https://faucet.solana.com.`
+      });
+      return;
+    }
+
+    const marketConfig = await fetchMarketConfig(connection).catch(() => null);
+    const instructions: TransactionInstruction[] = [];
+
+    if (!marketConfig) {
+      instructions.push(
+        buildInitializeMarketIx({
+          venueId: BINANCE_SOL_CONFIG.venueId,
+          marketSymbol: BINANCE_SOL_CONFIG.marketSymbol,
+          intervalSeconds: BINANCE_SOL_CONFIG.intervalSeconds,
+          minRatePpm: BINANCE_SOL_CONFIG.minRatePpm,
+          maxRatePpm: BINANCE_SOL_CONFIG.maxRatePpm,
+          maxNotionalCents: BINANCE_SOL_CONFIG.maxNotionalCents,
+          safetyBufferBps: BINANCE_SOL_CONFIG.safetyBufferBps,
+          oracleAuthority: wallet.publicKey,
+          admin: wallet.publicKey,
+        })
+      );
+    } else if (marketConfig.isPaused) {
+      setChainAction({ state: "error", message: "The on-chain SOL-PERP market is currently paused." });
+      return;
+    }
+
+    const contractId = createContractId("RPL", wallet.publicKey);
+    instructions.push(
+      buildCreateOfferIx({
+        contractId,
+        marketSymbol: terms.marketSymbol,
+        buyer: wallet.publicKey!,
+        positionSide: terms.positionSide,
+        notionalCents: terms.notionalCents,
+        fixedRatePpm: terms.fixedRatePpm,
+        intervalCount: terms.intervalCount,
+        startTime: Math.floor(Date.now() / 1000),
+      })
+    );
+
+    const signature = await runOnChainAction(
+      () => simulateAndSendTransaction({
+        connection,
+        wallet,
+        description: marketConfig ? "Create replay contract" : "Initialize market & create replay contract",
+        instructions,
+      }),
+      `Replay contract ${contractId} created on Testnet.`,
+    );
+    if (!signature) return;
+    setOnChainContractId(contractId);
+    const account = await refreshOnChainState(contractId);
+    if (account) setStep(2);
+  };
+
+  const handleAcceptOnChainContract = async () => {
+    if (!wallet.publicKey || !onChainContractId) {
+      setChainAction({ state: "error", message: "Connect a risk-taker wallet after creating the replay contract." });
+      return;
+    }
+    const account = await refreshOnChainState();
+    if (!account) {
+      setChainAction({ state: "error", message: "The replay contract account could not be read from Testnet." });
+      return;
+    }
+    const signature = await runOnChainAction(
+      () => simulateAndSendTransaction({
+        connection,
+        wallet,
+        description: "Accept replay contract",
+        instructions: [buildAcceptOfferIx({ contractPda, riskTaker: wallet.publicKey! })],
+      }),
+      "Risk taker accepted the replay contract.",
+    );
+    if (signature) await refreshOnChainState();
+  };
+
+  // Reset the current flow view.
   const handleReset = () => {
     setStep(1);
     setIsPlayingAuto(false);
@@ -123,10 +285,57 @@ export const ReplayDemo: React.FC = () => {
     setIsFinalized(false);
     setMissingObsActive(false);
     setShortfallActive(false);
+    setOnChainContractId(null);
+    setOnChainState(null);
+    setChainAction({ state: "idle", message: "" });
   };
 
   // Step 2: Deposit collateral
-  const handleDepositBoth = () => {
+  const handleDepositBoth = async () => {
+    if (onChainContractId) {
+      if (!wallet.publicKey) {
+        setChainAction({ state: "error", message: "Connect the wallet that owns this side of the contract." });
+        return;
+      }
+      const account = await refreshOnChainState();
+      if (!account) {
+        setChainAction({ state: "error", message: "The replay contract account could not be read from Testnet." });
+        return;
+      }
+      const isBuyer = account.buyer.equals(wallet.publicKey);
+      const isRiskTaker = account.riskTaker.equals(wallet.publicKey);
+      if (!isBuyer && !isRiskTaker) {
+        setChainAction({ state: "error", message: "This wallet is not one of the contract participants." });
+        return;
+      }
+      const amount = isBuyer
+        ? account.requiredBuyerCollateral - account.depositedBuyerCollateral
+        : account.requiredRiskTakerCollateral - account.depositedRiskTakerCollateral;
+      if (amount <= BigInt(0)) {
+        setChainAction({ state: "error", message: "This wallet has already deposited its required collateral." });
+        return;
+      }
+      const signature = await runOnChainAction(
+        () => simulateAndSendTransaction({
+          connection,
+          wallet,
+          description: "Deposit replay collateral",
+          instructions: [buildDepositCollateralIx({
+            contractPda,
+            vaultPda,
+            depositor: wallet.publicKey!,
+            amountLamports: Number(amount),
+          })],
+        }),
+        `Deposited ${(Number(amount) / 1_000_000_000).toFixed(4)} SOL into the replay vault.`,
+      );
+      if (signature) {
+        const updated = await refreshOnChainState();
+        if (updated?.lifecycleLabel === "Funded") setStep(3);
+      }
+      return;
+    }
+
     const buyerDeposit = shortfallActive ? req.buyerCollateralCents - 5000 : req.buyerCollateralCents;
     setBuyerDeposited(buyerDeposit);
     setTakerDeposited(req.riskTakerCollateralCents);
@@ -134,12 +343,83 @@ export const ReplayDemo: React.FC = () => {
   };
 
   // Step 3: Activate
-  const handleActivate = () => {
+  const handleActivate = async () => {
+    if (onChainContractId) {
+      if (!wallet.publicKey) {
+        setChainAction({ state: "error", message: "Connect a wallet to activate the funded contract." });
+        return;
+      }
+      const marketConfig = await fetchMarketConfig(connection).catch(() => null);
+      if (!marketConfig) {
+        setChainAction({ state: "error", message: "The SOL-PERP market configuration could not be read from Testnet." });
+        return;
+      }
+      const signature = await runOnChainAction(
+        () => simulateAndSendTransaction({
+          connection,
+          wallet,
+          description: "Activate replay contract",
+          instructions: [buildActivateContractIx({
+            contractPda,
+            marketConfigPda: marketConfig.address,
+            authority: wallet.publicKey!,
+          })],
+        }),
+        "Replay contract activated on Testnet.",
+      );
+      if (signature) {
+        const updated = await refreshOnChainState();
+        if (updated?.lifecycleLabel === "Active") setStep(4);
+      }
+      return;
+    }
     setStep(4);
   };
 
   // Publish next single interval
-  const handlePublishNext = () => {
+  const handlePublishNext = async () => {
+    if (onChainContractId) {
+      if (!wallet.publicKey) {
+        setChainAction({ state: "error", message: "Connect the configured oracle wallet before publishing observations." });
+        return;
+      }
+      const account = await refreshOnChainState();
+      if (!account) {
+        setChainAction({ state: "error", message: "The replay contract account could not be read from Testnet." });
+        return;
+      }
+      const observation = BASELINE_DOCUMENTED_OBSERVATIONS[account.submittedObservationsCount];
+      if (!observation) {
+        setChainAction({ state: "error", message: "All configured observations have already been recorded." });
+        return;
+      }
+      const marketConfig = await fetchMarketConfig(connection).catch(() => null);
+      if (!marketConfig) {
+        setChainAction({ state: "error", message: "The SOL-PERP market configuration could not be read from Testnet." });
+        return;
+      }
+      const signature = await runOnChainAction(
+        () => simulateAndSendTransaction({
+          connection,
+          wallet,
+          description: `Record funding observation ${observation.intervalIndex}`,
+          instructions: [buildRecordObservationIx({
+            contractPda,
+            marketConfigPda: marketConfig.address,
+            oracleAuthority: wallet.publicKey!,
+            intervalIndex: observation.intervalIndex,
+            realizedRatePpm: observation.ratePpm,
+            recordedAt: Math.floor(Date.now() / 1000),
+          })],
+        }),
+        `Observation #${observation.intervalIndex} recorded on Testnet.`,
+      );
+      if (signature) {
+        const updated = await refreshOnChainState();
+        if (updated && updated.submittedObservationsCount >= updated.intervalCount) setStep(5);
+      }
+      return;
+    }
     if (publishedCount < 21) {
       const idx = publishedCount;
       const obs = BASELINE_DOCUMENTED_OBSERVATIONS[idx];
@@ -162,7 +442,41 @@ export const ReplayDemo: React.FC = () => {
   };
 
   // Finalize
-  const handleFinalize = () => {
+  const handleFinalize = async () => {
+    if (onChainContractId) {
+      if (!wallet.publicKey) {
+        setChainAction({ state: "error", message: "Connect a wallet to finalize the contract." });
+        return;
+      }
+      const account = await refreshOnChainState();
+      if (!account) {
+        setChainAction({ state: "error", message: "The replay contract account could not be read from Testnet." });
+        return;
+      }
+      const signature = await runOnChainAction(
+        () => simulateAndSendTransaction({
+          connection,
+          wallet,
+          description: "Finalize replay contract",
+          instructions: [buildFinalizeContractIx({
+            contractPda,
+            vaultPda,
+            buyer: account.buyer,
+            riskTaker: account.riskTaker,
+            caller: wallet.publicKey!,
+          })],
+        }),
+        "Replay contract finalized on Testnet.",
+      );
+      if (signature) {
+        const updated = await refreshOnChainState();
+        if (updated?.lifecycleLabel === "Settled") {
+          setIsFinalized(true);
+          setStep(6);
+        }
+      }
+      return;
+    }
     if (missingObsActive) {
       // Prevent finalization
       return;
@@ -176,10 +490,10 @@ export const ReplayDemo: React.FC = () => {
       {/* Header and Reset */}
       <div className="dashboard-toolbar">
         <div>
-          <span className="dashboard-eyebrow">Protocol walkthrough · deterministic demo</span>
-          <h1>Seven-day protocol replay</h1>
+          <span className="dashboard-eyebrow">Live contract flow · Solana Testnet</span>
+          <h1>FundingLock contract lifecycle</h1>
           <p>
-            Observe the complete lifecycle: agreement → deposit → activation → oracle interval updates → net settlement
+            Create a real contract PDA, deposit native SOL, activate it, record oracle observations, and finalize the vault. Local preview controls are available only before a Testnet contract is created.
           </p>
         </div>
 
@@ -188,7 +502,7 @@ export const ReplayDemo: React.FC = () => {
           className="dashboard-control-muted flex items-center gap-1.5 self-start"
         >
           <RotateCcw className="w-3.5 h-3.5" />
-          <span>Reset Demo Flow</span>
+          <span>Reset Flow View</span>
         </button>
       </div>
 
@@ -224,6 +538,12 @@ export const ReplayDemo: React.FC = () => {
         })}
       </div>
 
+      {chainAction.message && (
+        <div className={`rounded-2xl border px-4 py-3 text-xs font-mono ${chainAction.state === "error" ? "border-amber-400/30 bg-amber-400/10 text-amber-200" : chainAction.state === "success" ? "border-[#7af6a7]/30 bg-[#7af6a7]/10 text-[#b7ffcb]" : "border-white/10 bg-white/[0.06] text-zinc-300"}`}>
+          {chainAction.message}
+        </div>
+      )}
+
       {/* Interactive Controls & Status Card */}
       <div className="dashboard-dark-card p-5 sm:p-7 rounded-[32px] bg-[#111211] border border-white/10 space-y-6 shadow-[0_18px_50px_rgba(0,0,0,0.2)]">
         {/* Step Content */}
@@ -252,10 +572,11 @@ export const ReplayDemo: React.FC = () => {
               </div>
             </div>
             <button
-              onClick={() => setStep(2)}
+              onClick={handleCreateOnChainContract}
+              disabled={chainAction.state === "pending"}
               className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold transition"
             >
-              <span>Proceed to Collateral Deposit</span>
+              <span>{chainAction.state === "pending" ? "Awaiting wallet…" : "Create Contract on Testnet"}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
@@ -296,13 +617,26 @@ export const ReplayDemo: React.FC = () => {
               </button>
             </div>
 
-            <button
-              onClick={handleDepositBoth}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold transition"
-            >
-              <span>Deposit Collateral into Vault PDA</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {onChainContractId && onChainState?.lifecycleLabel === "Open" && (
+                <button
+                  onClick={handleAcceptOnChainContract}
+                  disabled={chainAction.state === "pending"}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#7af6a7] hover:bg-[#99f9ba] text-zinc-950 text-xs font-semibold transition disabled:opacity-50"
+                >
+                  <span>Accept as Risk Taker</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                onClick={handleDepositBoth}
+                disabled={chainAction.state === "pending"}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold transition disabled:opacity-50"
+              >
+                <span>{onChainContractId ? "Deposit This Wallet's Collateral" : "Deposit Collateral into Vault PDA"}</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         )}
 
@@ -383,20 +717,22 @@ export const ReplayDemo: React.FC = () => {
             {/* Interactive Control buttons */}
             {step === 4 && (
               <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={() => setIsPlayingAuto(!isPlayingAuto)}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold transition"
-                >
-                  {isPlayingAuto ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                  <span>{isPlayingAuto ? "Pause Auto-Publish" : "Auto-Publish 8h Epochs"}</span>
-                </button>
+                {!onChainContractId && (
+                  <button
+                    onClick={() => setIsPlayingAuto(!isPlayingAuto)}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-zinc-100 hover:bg-white text-zinc-950 text-xs font-semibold transition"
+                  >
+                    {isPlayingAuto ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                    <span>{isPlayingAuto ? "Pause Auto-Publish" : "Auto-Publish 8h Epochs"}</span>
+                  </button>
+                )}
 
                 <button
                   onClick={handlePublishNext}
-                  disabled={isPlayingAuto}
+                  disabled={isPlayingAuto || chainAction.state === "pending"}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs font-mono text-zinc-300 disabled:opacity-50"
                 >
-                  <span>Step +1 Interval</span>
+                  <span>{onChainContractId ? "Publish Next Observation" : "Step +1 Interval"}</span>
                 </button>
 
                 {/* Missing Observation Simulator Toggle */}

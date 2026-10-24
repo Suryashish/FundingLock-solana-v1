@@ -1,5 +1,5 @@
 allowBuilds:
-  '@stellar/stellar-sdk': true
+  '@stellar/stellar-sdk': false
   blake-hash: true
   bufferutil: true
   protobufjs: true

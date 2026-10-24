@@ -11,7 +11,7 @@ if (typeof window !== "undefined") {
 }
 
 export const PROGRAM_ID = new PublicKey(
-  "78VTWQn5FdEE3vWvincjDG5cp1J7x3s8ioZzcXEMksxx"
+  "HSMBzbTfQQgLKk9Bv7d9WkLiK1yvKCs9FkeGgBhgfZj9"
 );
 
 export const TESTNET_RPC_URL =

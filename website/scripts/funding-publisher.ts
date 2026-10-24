@@ -12,7 +12,13 @@
  *   node scripts/funding-publisher.ts
  */
 
-import { Keypair } from '@solana/web3.js';
+import {
+  Connection,
+  Keypair,
+  PublicKey,
+  sendAndConfirmTransaction,
+  Transaction,
+} from '@solana/web3.js';
 import {
   PROGRAM_ID,
   getContractPda,
@@ -25,6 +31,8 @@ import {
 import { BINANCE_SOL_CONFIG } from '../lib/domain/types.ts';
 
 const RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.testnet.solana.com';
+const CONTRACT_ID = process.env.CONTRACT_ID || 'FL-SOL-001';
+const SCENARIO_NAME = process.env.SCENARIO_NAME || 'baseline';
 
 export interface PublisherConfig {
   contractId: string;
@@ -57,6 +65,23 @@ export async function runPublisher(config: PublisherConfig) {
 
   const [contractPda] = getContractPda(config.contractId);
   const [marketConfigPda] = getMarketConfigPda(BINANCE_SOL_CONFIG.marketSymbol);
+  const connection = new Connection(RPC_URL, 'confirmed');
+  const isDryRun = !process.env.PUBLISHER_SECRET_KEY;
+
+  const marketConfigInfo = await connection.getAccountInfo(marketConfigPda, 'confirmed');
+  if (!marketConfigInfo || marketConfigInfo.data.length !== 148) {
+    throw new Error(`MarketConfig PDA ${marketConfigPda.toBase58()} is not initialized on ${RPC_URL}.`);
+  }
+  const configuredOracleAuthority = new PublicKey(marketConfigInfo.data.subarray(40, 72));
+  if (!isDryRun && !configuredOracleAuthority.equals(publisherKeypair.publicKey)) {
+    throw new Error(
+      `Publisher ${publisherKeypair.publicKey.toBase58()} is not the configured oracle authority ${configuredOracleAuthority.toBase58()}.`
+    );
+  }
+
+  if (isDryRun) {
+    console.warn('\nNo PUBLISHER_SECRET_KEY supplied; running in dry-run mode without broadcasting transactions.');
+  }
 
   const scenario = DEMO_SCENARIOS[config.scenarioName] || DEMO_SCENARIOS.baseline;
   const observations = scenario.observations;
@@ -77,7 +102,7 @@ export async function runPublisher(config: PublisherConfig) {
       continue;
     }
 
-    buildRecordObservationIx({
+    const instruction = buildRecordObservationIx({
       contractPda,
       marketConfigPda,
       oracleAuthority: publisherKeypair.publicKey,
@@ -85,6 +110,27 @@ export async function runPublisher(config: PublisherConfig) {
       realizedRatePpm: obs.ratePpm,
       recordedAt: Math.floor(Date.now() / 1000),
     });
+
+    if (!isDryRun) {
+      const latestBlockhash = await connection.getLatestBlockhash('confirmed');
+      const transaction = new Transaction({
+        feePayer: publisherKeypair.publicKey,
+        recentBlockhash: latestBlockhash.blockhash,
+      }).add(instruction);
+      const simulation = await connection.simulateTransaction(transaction, [publisherKeypair]);
+      if (simulation.value.err) {
+        throw new Error(
+          `Simulation failed for interval ${obs.intervalIndex}: ${JSON.stringify(simulation.value.err)}`
+        );
+      }
+      const signature = await sendAndConfirmTransaction(
+        connection,
+        transaction,
+        [publisherKeypair],
+        { commitment: 'confirmed', maxRetries: 3 }
+      );
+      console.log(`  Confirmed: ${signature}`);
+    }
 
     console.log(
       `[PUBLISH] Interval ${obs.intervalIndex.toString().padStart(2, '0')} | ` +
@@ -101,9 +147,10 @@ export async function runPublisher(config: PublisherConfig) {
 }
 
 runPublisher({
-  contractId: 'FL-SOL-001',
-  scenarioName: 'baseline',
+  contractId: CONTRACT_ID,
+  scenarioName: SCENARIO_NAME,
   delayMsPerInterval: 20,
+  skipInterval: process.env.SKIP_INTERVAL ? Number(process.env.SKIP_INTERVAL) : undefined,
 }).catch((err) => {
   console.error('Publisher error:', err);
 });

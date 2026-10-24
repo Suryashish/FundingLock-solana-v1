@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   BINANCE_SOL_CONFIG,
   ContractTerms,
@@ -28,6 +28,23 @@ import {
   MoreHorizontal,
   CheckCircle2,
 } from "lucide-react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import { TransactionInstruction } from "@solana/web3.js";
+import {
+  buildCreateOfferIx,
+  buildInitializeMarketIx,
+} from "../lib/solana/client.ts";
+import {
+  createContractId,
+  fetchContractAccount,
+  fetchMarketConfig,
+  formatSignature,
+  lamportsToSol,
+  simulateAndSendTransaction,
+  type OnChainContractState,
+  type OnChainMarketConfig,
+} from "../lib/solana/transactions.ts";
 
 interface HedgeSimulatorProps {
   customObservations?: FundingObservation[] | null;
@@ -43,6 +60,15 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
   const [showVaultDetails, setShowVaultDetails] = useState<boolean>(false);
   const [paramMenuOpen, setParamMenuOpen] = useState<boolean>(false);
   const [settlementMenuOpen, setSettlementMenuOpen] = useState<boolean>(false);
+  const { connection } = useConnection();
+  const wallet = useWallet();
+  const { setVisible } = useWalletModal();
+  const [marketConfig, setMarketConfig] = useState<OnChainMarketConfig | null>(null);
+  const [onChainContract, setOnChainContract] = useState<OnChainContractState | null>(null);
+  const [chainAction, setChainAction] = useState<{
+    state: "idle" | "pending" | "success" | "error";
+    message: string;
+  }>({ state: "idle", message: "" });
 
   // Active observations
   const activeObservations = useMemo(() => {
@@ -69,7 +95,7 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
       endTime: FIXTURE_START_TIME + (activeObservations.length || 21) * INTERVAL_SECONDS,
       minRatePpm: BINANCE_SOL_CONFIG.minRatePpm,
       maxRatePpm: BINANCE_SOL_CONFIG.maxRatePpm,
-      collateralMint: "USDC",
+      collateralMint: "SOL",
     };
   }, [positionSide, notionalDollars, fixedRatePercent, activeObservations.length]);
 
@@ -77,6 +103,153 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
   const explanation = useMemo(() => {
     return buildCashFlowComparison(terms, activeObservations, BINANCE_SOL_CONFIG);
   }, [terms, activeObservations]);
+
+  useEffect(() => {
+    let active = true;
+    fetchMarketConfig(connection)
+      .then((config) => {
+        if (active) setMarketConfig(config);
+      })
+      .catch(() => {
+        if (active) setMarketConfig(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [connection]);
+
+  const handleInitializeMarket = async () => {
+    if (!wallet.publicKey) {
+      setChainAction({ state: "error", message: "Connect a wallet before initializing the Testnet market." });
+      return;
+    }
+
+    setChainAction({ state: "pending", message: "Simulating market initialization…" });
+    try {
+      const signature = await simulateAndSendTransaction({
+        connection,
+        wallet,
+        description: "Market initialization",
+        instructions: [
+          buildInitializeMarketIx({
+            venueId: BINANCE_SOL_CONFIG.venueId,
+            marketSymbol: BINANCE_SOL_CONFIG.marketSymbol,
+            intervalSeconds: BINANCE_SOL_CONFIG.intervalSeconds,
+            minRatePpm: BINANCE_SOL_CONFIG.minRatePpm,
+            maxRatePpm: BINANCE_SOL_CONFIG.maxRatePpm,
+            maxNotionalCents: BINANCE_SOL_CONFIG.maxNotionalCents,
+            safetyBufferBps: BINANCE_SOL_CONFIG.safetyBufferBps,
+            oracleAuthority: wallet.publicKey,
+            admin: wallet.publicKey,
+          }),
+        ],
+      });
+      const config = await fetchMarketConfig(connection);
+      setMarketConfig(config);
+      setChainAction({
+        state: "success",
+        message: `Market initialized. Transaction ${formatSignature(signature)}.`
+      });
+    } catch (error) {
+      setChainAction({
+        state: "error",
+        message: error instanceof Error ? error.message : "Market initialization failed.",
+      });
+    }
+  };
+
+  const handleCreateOfferOnChain = async () => {
+    if (!wallet.connected || !wallet.publicKey) {
+      setChainAction({
+        state: "error",
+        message: "Wallet not connected. Opening wallet selector... Please connect Phantom or Solflare on Solana Testnet.",
+      });
+      setVisible(true);
+      return;
+    }
+    if (positionSide !== "long") {
+      setChainAction({
+        state: "error",
+        message: "The deployed Testnet contract currently supports long offers only.",
+      });
+      return;
+    }
+
+    setChainAction({ state: "pending", message: "Verifying Testnet balance and preparing transaction…" });
+    try {
+      // 1. Balance verification
+      const lamports = await connection.getBalance(wallet.publicKey, "confirmed");
+      if (lamports < 5_000_000) {
+        throw new Error(
+          `Insufficient Testnet SOL (balance: ${(lamports / 1e9).toFixed(4)} SOL). You need ~0.005 SOL for transaction fees & account rent. Ensure your wallet network is set to Testnet, and fund it at https://faucet.solana.com.`
+        );
+      }
+
+      // 2. Market config check & auto-initialization bundling
+      let config = marketConfig ?? (await fetchMarketConfig(connection));
+      const instructions: TransactionInstruction[] = [];
+
+      if (!config) {
+        instructions.push(
+          buildInitializeMarketIx({
+            venueId: BINANCE_SOL_CONFIG.venueId,
+            marketSymbol: BINANCE_SOL_CONFIG.marketSymbol,
+            intervalSeconds: BINANCE_SOL_CONFIG.intervalSeconds,
+            minRatePpm: BINANCE_SOL_CONFIG.minRatePpm,
+            maxRatePpm: BINANCE_SOL_CONFIG.maxRatePpm,
+            maxNotionalCents: BINANCE_SOL_CONFIG.maxNotionalCents,
+            safetyBufferBps: BINANCE_SOL_CONFIG.safetyBufferBps,
+            oracleAuthority: wallet.publicKey,
+            admin: wallet.publicKey,
+          })
+        );
+      } else if (config.isPaused) {
+        throw new Error("The on-chain SOL-PERP market is currently paused.");
+      }
+
+      // 3. Create offer instruction
+      const contractId = createContractId("SIM", wallet.publicKey);
+      instructions.push(
+        buildCreateOfferIx({
+          contractId,
+          marketSymbol: BINANCE_SOL_CONFIG.marketSymbol,
+          buyer: wallet.publicKey,
+          positionSide,
+          notionalCents: terms.notionalCents,
+          fixedRatePpm: terms.fixedRatePpm,
+          intervalCount: terms.intervalCount,
+          startTime: Math.floor(Date.now() / 1000),
+        })
+      );
+
+      setChainAction({
+        state: "pending",
+        message: "Awaiting wallet approval… Please approve the transaction in your wallet prompt.",
+      });
+
+      const signature = await simulateAndSendTransaction({
+        connection,
+        wallet,
+        description: config ? "Create offer" : "Initialize market & create offer",
+        instructions,
+      });
+
+      const updatedConfig = await fetchMarketConfig(connection);
+      if (updatedConfig) setMarketConfig(updatedConfig);
+
+      const account = await fetchContractAccount(connection, contractId);
+      setOnChainContract(account);
+      setChainAction({
+        state: "success",
+        message: `Offer ${contractId} created on Testnet! Transaction ${formatSignature(signature)}.`,
+      });
+    } catch (error) {
+      setChainAction({
+        state: "error",
+        message: error instanceof Error ? error.message : "Offer creation failed.",
+      });
+    }
+  };
 
   // Reset to documented baseline ($10k notional, 0.02% fixed rate, long, baseline scenario)
   const resetToDocumentedBaseline = () => {
@@ -92,7 +265,7 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
       <div className="text-center space-y-3 pt-3">
         <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-black/[0.04] dark:border-white/[0.06] text-xs font-mono text-zinc-600 dark:text-zinc-400 shadow-xs">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          <span>Binance SOL-PERP • 7-Day Cycle (21 Epochs)</span>
+          <span>Local calculator preview · Binance SOL-PERP · 7-Day Cycle</span>
         </div>
 
         <div className="space-y-1">
@@ -106,7 +279,7 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
             </span>
           </div>
           <p className="text-xs sm:text-sm text-zinc-400 font-mono">
-            Locked at <strong className="text-white">+{fixedRatePercent.toFixed(4)}%</strong> per 8h • 0.00% Net Variance • $10k Notional Baseline
+            Calculated locally at <strong className="text-white">+{fixedRatePercent.toFixed(4)}%</strong> per 8h • submit the offer below to write terms on Testnet
           </p>
         </div>
 
@@ -151,6 +324,44 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
             </button>
           </div>
         </div>
+      </div>
+
+      <div className="dashboard-dark-card p-4 sm:p-5 rounded-[24px] border border-white/10 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-white">
+              <span className={`w-2 h-2 rounded-full ${marketConfig ? "bg-[#7af6a7]" : "bg-amber-400"}`} />
+              {marketConfig ? "Testnet market is live" : "Testnet market setup required"}
+            </div>
+            <p className="text-[11px] text-zinc-400 mt-1">
+              {marketConfig
+                ? `Oracle authority: ${marketConfig.oracleAuthority.toBase58().slice(0, 6)}…${marketConfig.oracleAuthority.toBase58().slice(-4)}`
+                : "The first wallet to initialize this market becomes its admin and oracle authority."}
+            </p>
+          </div>
+          {!marketConfig && (
+            <button
+              type="button"
+              onClick={handleInitializeMarket}
+              disabled={chainAction.state === "pending"}
+              className="dashboard-control disabled:opacity-50"
+            >
+              Initialize Testnet Market
+            </button>
+          )}
+        </div>
+        {onChainContract && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] font-mono text-zinc-300">
+            <span>On-chain offer: {onChainContract.contractId}</span>
+            <span>State: {onChainContract.lifecycleLabel}</span>
+            <span>Required collateral: {lamportsToSol(onChainContract.requiredBuyerCollateral + onChainContract.requiredRiskTakerCollateral).toFixed(4)} SOL</span>
+          </div>
+        )}
+        {chainAction.message && (
+          <p className={`text-[11px] font-mono ${chainAction.state === "error" ? "text-amber-300" : chainAction.state === "success" ? "text-[#7af6a7]" : "text-zinc-300"}`}>
+            {chainAction.message}
+          </p>
+        )}
       </div>
 
       {/* 3. Program Escrow Solvency Vault Pill (Directly modeled on Vault Card in Image 2) */}
@@ -344,7 +555,7 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
             {/* Scenario Preset Selector */}
             <div className="space-y-1.5 pt-1">
               <span className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
-                Market Scenario Preset
+                Local Scenario Preset
               </span>
               <div className="grid grid-cols-2 gap-1.5 text-xs">
                 {Object.values(DEMO_SCENARIOS).map((sc) => {
@@ -386,7 +597,7 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
           </div>
         </div>
 
-        {/* Card 2: USDC Settlement & Solvency (Exact visual match to Image 2's Tether Card) */}
+        {/* Card 2: Native SOL Settlement & Solvency */}
         <div className="dashboard-card bg-white dark:bg-zinc-900/90 rounded-[32px] border border-black/[0.05] dark:border-white/[0.08] p-6 luxury-card flex flex-col justify-between space-y-6">
           <div className="space-y-5">
             {/* Card Header (Icon, Title & Menu) */}
@@ -397,9 +608,9 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
                 </div>
                 <div>
                   <h3 className="font-bold text-base text-zinc-950 dark:text-white">
-                    USDC Settlement
+                    SOL Settlement
                   </h3>
-                  <span className="text-[11px] text-zinc-400 font-mono">Escrow Vault</span>
+                    <span className="text-[11px] text-zinc-400 font-mono">Native SOL Escrow Vault</span>
                 </div>
               </div>
 
@@ -484,12 +695,35 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
           {/* Bottom Action Button (Matching Image 2's "Add to Vault" style button) */}
           <div className="pt-2">
             <button
-              onClick={() => {}}
+              type="button"
+              onClick={handleCreateOfferOnChain}
+              disabled={chainAction.state === "pending"}
               className="w-full py-3 rounded-2xl bg-[#7af6a7] hover:bg-[#99f9ba] text-zinc-950 text-xs font-semibold flex items-center justify-center gap-2 shadow-md transition"
             >
               <Lock className="w-3.5 h-3.5" />
-              <span>Lock Fixed Rate on Solana</span>
+              <span>
+                {chainAction.state === "pending"
+                  ? "Awaiting wallet…"
+                  : wallet.connected
+                    ? "Create Fixed-Rate Offer on Solana"
+                    : "Connect Wallet to Lock Rate"}
+              </span>
             </button>
+            {chainAction.message && (
+              <p
+                role="status"
+                aria-live="polite"
+                className={`mt-2 text-center text-[11px] font-mono ${
+                  chainAction.state === "error"
+                    ? "text-amber-700 dark:text-amber-300"
+                    : chainAction.state === "success"
+                      ? "text-emerald-700 dark:text-emerald-300"
+                      : "text-zinc-500 dark:text-zinc-400"
+                }`}
+              >
+                {chainAction.message}
+              </p>
+            )}
           </div>
         </div>
       </div>

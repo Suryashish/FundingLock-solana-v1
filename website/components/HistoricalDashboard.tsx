@@ -58,10 +58,10 @@ export const HistoricalDashboard: React.FC<HistoricalDashboardProps> = ({
       {/* Header with Venue & Interval Metadata */}
       <div className="dashboard-toolbar">
         <div>
-          <span className="dashboard-eyebrow">Market intelligence · Binance perpetuals</span>
-          <h1>Historical funding rates</h1>
+          <span className="dashboard-eyebrow">Local analysis dataset · Binance perpetuals</span>
+          <h1>Sample funding rates</h1>
           <p>
-            Verified 8-hour funding intervals (00:00, 08:00, 16:00 UTC) • Start-inclusive, End-exclusive
+            Fixture data for evaluating the calculator. This view is not a live Binance feed and does not read historical rates from Solana.
           </p>
         </div>
 
@@ -84,7 +84,7 @@ export const HistoricalDashboard: React.FC<HistoricalDashboardProps> = ({
             className="dashboard-control flex items-center gap-1.5"
           >
             <Play className="w-3.5 h-3.5" />
-            <span>Simulate this Period</span>
+            <span>Use in local calculator</span>
           </button>
         </div>
       </div>

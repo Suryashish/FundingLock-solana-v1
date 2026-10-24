@@ -8,7 +8,7 @@
 import { PublicKey, TransactionInstruction, SystemProgram } from '@solana/web3.js';
 import type { ContractStatus } from '../domain/types.ts';
 
-export const PROGRAM_ID = new PublicKey('78VTWQn5FdEE3vWvincjDG5cp1J7x3s8ioZzcXEMksxx');
+export const PROGRAM_ID = new PublicKey('HSMBzbTfQQgLKk9Bv7d9WkLiK1yvKCs9FkeGgBhgfZj9');
 export const TESTNET_ORACLE_PUBKEY = new PublicKey('A5oiFqG3hn39WSCGvCvSCbkWQJ8kzjNQM135WXnowv3E');
 
 export const SEEDS = {
@@ -17,6 +17,26 @@ export const SEEDS = {
   VAULT: Buffer.from('vault'),
   OBSERVATION: Buffer.from('observation'),
 };
+
+// Anchor instruction discriminators for the current on-chain program.
+// These must be the SHA-256("global:<instruction>") first eight bytes;
+// ASCII instruction names are not valid Anchor discriminators.
+const INSTRUCTION_DISCRIMINATORS = {
+  initializeMarket: Buffer.from([35, 35, 189, 193, 155, 48, 170, 203]),
+  createOffer: Buffer.from([237, 233, 192, 168, 248, 7, 249, 241]),
+  acceptOffer: Buffer.from([227, 82, 234, 131, 1, 18, 48, 2]),
+  depositCollateral: Buffer.from([156, 131, 142, 116, 146, 247, 162, 120]),
+  activateContract: Buffer.from([204, 69, 36, 86, 236, 147, 218, 39]),
+  recordFundingObservation: Buffer.from([240, 5, 202, 73, 254, 50, 86, 35]),
+  finalizeContract: Buffer.from([49, 201, 251, 177, 252, 136, 109, 178]),
+  cancelUnmatchedOffer: Buffer.from([208, 157, 107, 124, 5, 55, 81, 222]),
+} as const;
+
+export function getInstructionDiscriminator(
+  name: keyof typeof INSTRUCTION_DISCRIMINATORS
+): Buffer {
+  return Buffer.from(INSTRUCTION_DISCRIMINATORS[name]);
+}
 
 /**
  * Format fixed-size byte array string for PDA seeds
@@ -82,6 +102,56 @@ export function getObservationPda(
 }
 
 /**
+ * Instruction builder: Initialize the SOL-PERP market configuration.
+ * This is a one-time testnet setup action; the first signer becomes admin.
+ */
+export function buildInitializeMarketIx(params: {
+  venueId: string;
+  marketSymbol: string;
+  intervalSeconds: number;
+  minRatePpm: number;
+  maxRatePpm: number;
+  maxNotionalCents: number;
+  safetyBufferBps: number;
+  oracleAuthority: PublicKey;
+  admin: PublicKey;
+  programId?: PublicKey;
+}): TransactionInstruction {
+  const programId = params.programId || PROGRAM_ID;
+  const [marketConfigPda] = getMarketConfigPda(params.marketSymbol, programId);
+  const data = Buffer.alloc(8 + 16 + 16 + 8 + 8 + 8 + 8 + 2 + 32);
+  let offset = 0;
+
+  getInstructionDiscriminator('initializeMarket').copy(data, offset);
+  offset += 8;
+  stringToBytes16(params.venueId).copy(data, offset);
+  offset += 16;
+  stringToBytes16(params.marketSymbol).copy(data, offset);
+  offset += 16;
+  data.writeBigUInt64LE(BigInt(params.intervalSeconds), offset);
+  offset += 8;
+  data.writeBigInt64LE(BigInt(params.minRatePpm), offset);
+  offset += 8;
+  data.writeBigInt64LE(BigInt(params.maxRatePpm), offset);
+  offset += 8;
+  data.writeBigUInt64LE(BigInt(params.maxNotionalCents), offset);
+  offset += 8;
+  data.writeUInt16LE(params.safetyBufferBps, offset);
+  offset += 2;
+  params.oracleAuthority.toBuffer().copy(data, offset);
+
+  return new TransactionInstruction({
+    programId,
+    keys: [
+      { pubkey: marketConfigPda, isSigner: false, isWritable: true },
+      { pubkey: params.admin, isSigner: true, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    data,
+  });
+}
+
+/**
  * Instruction builder: Create Offer
  */
 export function buildCreateOfferIx(params: {
@@ -99,10 +169,9 @@ export function buildCreateOfferIx(params: {
   const [contractPda] = getContractPda(params.contractId, programId);
   const [marketConfigPda] = getMarketConfigPda(params.marketSymbol, programId);
 
-  // Instruction data buffer: Discriminator (8) + id (16) + side (1) + notional (8) + rate (8) + count (2) + start (8)
+  // Instruction data buffer: discriminator + id + side + notional + rate + count + start.
   const data = Buffer.alloc(8 + 16 + 1 + 8 + 8 + 2 + 8);
-  // Discriminator: [79, 102, 102, 101, 114, 67, 114, 101]
-  Buffer.from([79, 102, 102, 101, 114, 67, 114, 101]).copy(data, 0);
+  getInstructionDiscriminator('createOffer').copy(data, 0);
   stringToBytes16(params.contractId).copy(data, 8);
   data.writeUInt8(params.positionSide === 'long' ? 0 : 1, 24);
   data.writeBigUInt64LE(BigInt(params.notionalCents), 25);
@@ -131,7 +200,7 @@ export function buildAcceptOfferIx(params: {
   programId?: PublicKey;
 }): TransactionInstruction {
   const programId = params.programId || PROGRAM_ID;
-  const data = Buffer.from([65, 99, 99, 101, 112, 116, 79, 102]);
+  const data = getInstructionDiscriminator('acceptOffer');
 
   return new TransactionInstruction({
     programId,
@@ -155,7 +224,7 @@ export function buildDepositCollateralIx(params: {
 }): TransactionInstruction {
   const programId = params.programId || PROGRAM_ID;
   const data = Buffer.alloc(8 + 8);
-  Buffer.from([68, 101, 112, 111, 115, 105, 116, 67]).copy(data, 0);
+  getInstructionDiscriminator('depositCollateral').copy(data, 0);
   data.writeBigUInt64LE(BigInt(params.amountLamports), 8);
 
   return new TransactionInstruction({
@@ -180,7 +249,7 @@ export function buildActivateContractIx(params: {
   programId?: PublicKey;
 }): TransactionInstruction {
   const programId = params.programId || PROGRAM_ID;
-  const data = Buffer.from([65, 99, 116, 105, 118, 97, 116, 101]);
+  const data = getInstructionDiscriminator('activateContract');
 
   return new TransactionInstruction({
     programId,
@@ -209,7 +278,7 @@ export function buildRecordObservationIx(params: {
   const [observationPda] = getObservationPda(params.contractPda, params.intervalIndex, programId);
 
   const data = Buffer.alloc(8 + 2 + 8 + 8);
-  Buffer.from([82, 101, 99, 111, 114, 100, 79, 98]).copy(data, 0);
+  getInstructionDiscriminator('recordFundingObservation').copy(data, 0);
   data.writeUInt16LE(params.intervalIndex, 8);
   data.writeBigInt64LE(BigInt(params.realizedRatePpm), 10);
   data.writeBigInt64LE(BigInt(params.recordedAt), 18);
@@ -239,7 +308,7 @@ export function buildFinalizeContractIx(params: {
   programId?: PublicKey;
 }): TransactionInstruction {
   const programId = params.programId || PROGRAM_ID;
-  const data = Buffer.from([70, 105, 110, 97, 108, 105, 122, 101]);
+  const data = getInstructionDiscriminator('finalizeContract');
 
   return new TransactionInstruction({
     programId,
@@ -265,7 +334,7 @@ export function buildCancelOfferIx(params: {
   programId?: PublicKey;
 }): TransactionInstruction {
   const programId = params.programId || PROGRAM_ID;
-  const data = Buffer.from([67, 97, 110, 99, 101, 108, 79, 102]);
+  const data = getInstructionDiscriminator('cancelUnmatchedOffer');
 
   return new TransactionInstruction({
     programId,

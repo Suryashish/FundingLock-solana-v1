@@ -1,12 +1,28 @@
 "use client";
 
-import React, { useState } from "react";
-import { PRESET_MARKET_OFFERS, FIXTURE_START_TIME } from "../lib/data/fixtures.ts";
+import React, { useCallback, useEffect, useState } from "react";
+import { FIXTURE_START_TIME } from "../lib/data/fixtures.ts";
 import { BINANCE_SOL_CONFIG, ContractTerms, PositionSide } from "../lib/domain/types.ts";
 import { calculateCollateralRequirement } from "../lib/domain/collateral.ts";
 import { formatCurrency, formatRatePercent } from "../lib/domain/funding.ts";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { Plus, Check, X } from "lucide-react";
+import {
+  buildAcceptOfferIx,
+  buildCreateOfferIx,
+  buildInitializeMarketIx,
+  getContractPda,
+} from "../lib/solana/client.ts";
+import {
+  createContractId,
+  fetchContractAccount,
+  fetchContractAccounts,
+  fetchMarketConfig,
+  formatSignature,
+  simulateAndSendTransaction,
+  type OnChainContractState,
+} from "../lib/solana/transactions.ts";
 
 interface MarketplaceBoardProps {
   onAcceptOfferClick?: (offer: ContractTerms) => void;
@@ -15,8 +31,11 @@ interface MarketplaceBoardProps {
 export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
   onAcceptOfferClick,
 }) => {
-  const { publicKey } = useWallet();
-  const [offers, setOffers] = useState<ContractTerms[]>(PRESET_MARKET_OFFERS);
+  const wallet = useWallet();
+  const { connection } = useConnection();
+  const { publicKey } = wallet;
+  const [offers, setOffers] = useState<ContractTerms[]>([]);
+  const [isLoadingOffers, setIsLoadingOffers] = useState(true);
   const [filterSide, setFilterSide] = useState<"all" | "long" | "short">("all");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [acceptedOfferId, setAcceptedOfferId] = useState<string | null>(null);
@@ -25,6 +44,51 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
   const [newSide, setNewSide] = useState<PositionSide>("long");
   const [newNotional, setNewNotional] = useState<number>(10000);
   const [newFixedRate, setNewFixedRate] = useState<number>(0.02);
+  const [onChainContracts, setOnChainContracts] = useState<Record<string, OnChainContractState>>({});
+  const [actionStatus, setActionStatus] = useState<{
+    state: "idle" | "pending" | "success" | "error";
+    message: string;
+  }>({ state: "idle", message: "" });
+
+  const loadOnChainOffers = useCallback(async () => {
+    setIsLoadingOffers(true);
+    try {
+      const accounts = await fetchContractAccounts(connection);
+      setOffers(accounts.map((account) => ({
+        contractId: account.contractId,
+        marketSymbol: account.marketSymbol,
+        venueId: "BINANCE_PERP",
+        positionSide: account.positionSide,
+        notionalCents: account.notionalCents,
+        fixedRatePpm: account.fixedRatePpm,
+        intervalCount: account.intervalCount,
+        intervalSeconds: account.intervalSeconds,
+        startTime: account.startTime,
+        endTime: account.endTime,
+        minRatePpm: BINANCE_SOL_CONFIG.minRatePpm,
+        maxRatePpm: BINANCE_SOL_CONFIG.maxRatePpm,
+        collateralMint: "SOL",
+        buyerPubkey: account.buyer.toBase58(),
+        riskTakerPubkey: account.riskTaker.equals(PublicKey.default) ? undefined : account.riskTaker.toBase58(),
+        status: account.lifecycleLabel as ContractTerms["status"],
+      })));
+      setOnChainContracts(Object.fromEntries(accounts.map((account) => [account.contractId, account])));
+    } catch (error) {
+      setActionStatus({
+        state: "error",
+        message: error instanceof Error ? error.message : "Could not read Testnet offers.",
+      });
+    } finally {
+      setIsLoadingOffers(false);
+    }
+  }, [connection]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadOnChainOffers();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadOnChainOffers]);
 
   // Live preview of required collateral
   const previewCollateral = React.useMemo(() => {
@@ -41,38 +105,141 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
       endTime: FIXTURE_START_TIME + 21 * 28800,
       minRatePpm: BINANCE_SOL_CONFIG.minRatePpm,
       maxRatePpm: BINANCE_SOL_CONFIG.maxRatePpm,
-      collateralMint: "USDC",
+       collateralMint: "SOL",
     };
     return calculateCollateralRequirement(terms, BINANCE_SOL_CONFIG);
   }, [newSide, newNotional, newFixedRate]);
 
-  const handleCreateOffer = (e: React.FormEvent) => {
+  const handleCreateOffer = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newOffer: ContractTerms = {
-      contractId: `OFFER-SOL-${Math.floor(100 + Math.random() * 900)}`,
-      marketSymbol: "SOL-PERP",
-      venueId: "BINANCE_PERP",
-      positionSide: newSide,
-      notionalCents: newNotional * 100,
-      fixedRatePpm: Math.round(newFixedRate * 10000),
-      intervalCount: 21,
-      intervalSeconds: 28800,
-      startTime: FIXTURE_START_TIME,
-      endTime: FIXTURE_START_TIME + 21 * 28800,
-      minRatePpm: BINANCE_SOL_CONFIG.minRatePpm,
-      maxRatePpm: BINANCE_SOL_CONFIG.maxRatePpm,
-      collateralMint: "USDC",
-      buyerPubkey: publicKey ? `${publicKey.toBase58().slice(0, 4)}...${publicKey.toBase58().slice(-4)}` : "Demo...User",
-      status: "Open",
-    };
-    setOffers([newOffer, ...offers]);
-    setShowCreateModal(false);
+    if (!publicKey) {
+      setActionStatus({ state: "error", message: "Connect a wallet before posting an on-chain offer." });
+      return;
+    }
+    if (newSide !== "long") {
+      setActionStatus({ state: "error", message: "The deployed Testnet contract currently supports long offers only." });
+      return;
+    }
+
+    setActionStatus({ state: "pending", message: "Verifying Testnet balance and preparing transaction…" });
+    try {
+      const lamports = await connection.getBalance(publicKey, "confirmed");
+      if (lamports < 5_000_000) {
+        throw new Error(
+          `Insufficient Testnet SOL (balance: ${(lamports / 1e9).toFixed(4)} SOL). You need ~0.005 SOL for transaction fees & account rent. Ensure your wallet is set to Testnet, and fund it at https://faucet.solana.com.`
+        );
+      }
+
+      let marketConfig = await fetchMarketConfig(connection);
+      const instructions: TransactionInstruction[] = [];
+
+      if (!marketConfig) {
+        instructions.push(
+          buildInitializeMarketIx({
+            venueId: BINANCE_SOL_CONFIG.venueId,
+            marketSymbol: BINANCE_SOL_CONFIG.marketSymbol,
+            intervalSeconds: BINANCE_SOL_CONFIG.intervalSeconds,
+            minRatePpm: BINANCE_SOL_CONFIG.minRatePpm,
+            maxRatePpm: BINANCE_SOL_CONFIG.maxRatePpm,
+            maxNotionalCents: BINANCE_SOL_CONFIG.maxNotionalCents,
+            safetyBufferBps: BINANCE_SOL_CONFIG.safetyBufferBps,
+            oracleAuthority: publicKey,
+            admin: publicKey,
+          })
+        );
+      } else if (marketConfig.isPaused) {
+        throw new Error("The on-chain SOL-PERP market is currently paused.");
+      }
+
+      const contractId = createContractId("OFF", publicKey);
+      instructions.push(
+        buildCreateOfferIx({
+          contractId,
+          marketSymbol: BINANCE_SOL_CONFIG.marketSymbol,
+          buyer: publicKey,
+          positionSide: newSide,
+          notionalCents: newNotional * 100,
+          fixedRatePpm: Math.round(newFixedRate * 10000),
+          intervalCount: 21,
+          startTime: Math.floor(Date.now() / 1000),
+        })
+      );
+
+      setActionStatus({
+        state: "pending",
+        message: "Awaiting wallet approval… Please approve the transaction in your wallet prompt.",
+      });
+
+      const signature = await simulateAndSendTransaction({
+        connection,
+        wallet,
+        description: marketConfig ? "Create marketplace offer" : "Initialize market & create marketplace offer",
+        instructions,
+      });
+      const account = await fetchContractAccount(connection, contractId);
+      if (account) {
+        setOnChainContracts((previous) => ({ ...previous, [contractId]: account }));
+      }
+
+      const newOffer: ContractTerms = {
+        contractId,
+        marketSymbol: "SOL-PERP",
+        venueId: "BINANCE_PERP",
+        positionSide: newSide,
+        notionalCents: newNotional * 100,
+        fixedRatePpm: Math.round(newFixedRate * 10000),
+        intervalCount: 21,
+        intervalSeconds: 28800,
+        startTime: FIXTURE_START_TIME,
+        endTime: FIXTURE_START_TIME + 21 * 28800,
+        minRatePpm: BINANCE_SOL_CONFIG.minRatePpm,
+        maxRatePpm: BINANCE_SOL_CONFIG.maxRatePpm,
+        collateralMint: "SOL",
+        buyerPubkey: publicKey.toBase58(),
+        status: "Open",
+      };
+      setOffers((previous) => [newOffer, ...previous]);
+      setShowCreateModal(false);
+      setActionStatus({ state: "success", message: `Offer ${contractId} created. Transaction ${formatSignature(signature)}.` });
+    } catch (error) {
+      setActionStatus({ state: "error", message: error instanceof Error ? error.message : "Offer creation failed." });
+    }
   };
 
-  const handleAccept = (offer: ContractTerms) => {
-    setAcceptedOfferId(offer.contractId);
-    if (onAcceptOfferClick) {
-      onAcceptOfferClick(offer);
+  const handleAccept = async (offer: ContractTerms) => {
+    if (!publicKey) {
+      setActionStatus({ state: "error", message: "Connect a wallet before accepting an on-chain offer." });
+      return;
+    }
+    setActionStatus({ state: "pending", message: "Simulating offer acceptance…" });
+    try {
+      const existing = onChainContracts[offer.contractId] ?? (await fetchContractAccount(connection, offer.contractId));
+      if (!existing) {
+        throw new Error("This row is a fixture offer without a matching on-chain account. Create a new on-chain offer first.");
+      }
+      if (existing.buyer.equals(publicKey)) {
+        throw new Error("The offer creator cannot accept their own offer as the risk taker.");
+      }
+
+      const [contractPda] = getContractPda(offer.contractId);
+      const signature = await simulateAndSendTransaction({
+        connection,
+        wallet,
+        description: "Accept marketplace offer",
+        instructions: [buildAcceptOfferIx({ contractPda, riskTaker: publicKey })],
+      });
+      const account = await fetchContractAccount(connection, offer.contractId);
+      if (account) {
+        setOnChainContracts((previous) => ({ ...previous, [offer.contractId]: account }));
+      }
+      setAcceptedOfferId(offer.contractId);
+      setOffers((previous) => previous.map((item) => item.contractId === offer.contractId ? { ...item, status: "Matched" } : item));
+      setActionStatus({ state: "success", message: `Offer accepted. Transaction ${formatSignature(signature)}.` });
+      if (onAcceptOfferClick) {
+        onAcceptOfferClick(offer);
+      }
+    } catch (error) {
+      setActionStatus({ state: "error", message: error instanceof Error ? error.message : "Offer acceptance failed." });
     }
   };
 
@@ -86,10 +253,10 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
       {/* Header and Create Button */}
       <div className="dashboard-toolbar">
         <div>
-          <span className="dashboard-eyebrow">Fixed-rate liquidity · SOL-PERP</span>
+          <span className="dashboard-eyebrow">Live Testnet liquidity · SOL-PERP</span>
           <h1>Hedge marketplace</h1>
           <p>
-            Browse compatible fixed-rate protection offers or create your own collateralized hedge agreement
+            Offers below are read from ContractAccount PDAs on Solana Testnet. Create and accept actions require wallet approval.
           </p>
         </div>
 
@@ -101,6 +268,12 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
           <span>Create New Offer</span>
         </button>
       </div>
+
+      {actionStatus.message && (
+        <div className={`rounded-2xl border px-4 py-3 text-xs font-mono ${actionStatus.state === "error" ? "border-amber-400/30 bg-amber-400/10 text-amber-200" : actionStatus.state === "success" ? "border-[#7af6a7]/30 bg-[#7af6a7]/10 text-[#b7ffcb]" : "border-white/10 bg-white/[0.06] text-zinc-300"}`}>
+          {actionStatus.message}
+        </div>
+      )}
 
       {/* Filter and Overview stats */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono">
@@ -118,7 +291,7 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
         </div>
 
         <div className="flex items-center gap-4 text-zinc-400 text-[11px]">
-          <span>Total offers: <strong className="text-white">{filteredOffers.length}</strong></span>
+          <span>Total on-chain offers: <strong className="text-white">{filteredOffers.length}</strong></span>
           <span>Collateral standard: <strong className="text-zinc-200">100% locked</strong></span>
         </div>
       </div>
@@ -126,6 +299,14 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
       {/* Offers Table */}
       <div className="dashboard-table-wrap p-2 sm:p-4 space-y-4">
         <div className="overflow-x-auto">
+          {isLoadingOffers ? (
+            <div className="p-8 text-center text-xs font-mono text-zinc-500">Reading ContractAccount PDAs from Testnet…</div>
+          ) : filteredOffers.length === 0 ? (
+            <div className="p-8 text-center space-y-2">
+              <div className="text-sm font-semibold text-zinc-950">No on-chain offers found</div>
+              <p className="text-xs text-zinc-500">Create an offer to write the first ContractAccount PDA for this market.</p>
+            </div>
+          ) : (
           <table className="w-full text-left text-xs font-mono">
             <thead className="text-[10px] uppercase text-zinc-500 border-b border-zinc-200">
               <tr>
@@ -195,6 +376,7 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
               })}
             </tbody>
           </table>
+          )}
         </div>
       </div>
 
