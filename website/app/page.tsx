@@ -23,6 +23,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<NavTab>("simulator");
   const [customObservations, setCustomObservations] = useState<FundingObservation[] | null>(null);
   const [isDark, setIsDark] = useState<boolean>(false);
+  const isDashboard = activeTab !== "overview";
 
   // Sync theme with document element
   useEffect(() => {
@@ -44,7 +45,11 @@ export default function Home() {
 
   return (
     <WalletContextProvider>
-      <div className="min-h-screen flex flex-col font-sans transition-colors duration-200">
+      <div
+        className={`min-h-screen flex flex-col font-sans transition-colors duration-200 ${
+          isDashboard ? "dashboard-shell" : "bg-[var(--bg-app)]"
+        }`}
+      >
         {/* Luxury Header Bar with Integrated Ticker */}
         <Navbar
           activeTab={activeTab}
@@ -59,7 +64,11 @@ export default function Home() {
         />
 
         {/* Main Content Viewport */}
-        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10">
+        <main
+          className={`flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 ${
+            isDashboard ? "dashboard-main" : ""
+          }`}
+        >
           {activeTab === "simulator" && (
             <HedgeSimulator customObservations={customObservations} />
           )}
@@ -82,7 +91,7 @@ export default function Home() {
         </main>
 
         {/* Institutional Minimalist Monochromatic Footer */}
-        <footer className="border-t border-black/[0.05] dark:border-white/[0.08] py-6 text-xs text-zinc-500 font-mono">
+        <footer className="border-t border-black/[0.05] dark:border-white/[0.08] py-6 text-xs text-zinc-500 font-mono dashboard-footer">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px]">
             <div className="flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />

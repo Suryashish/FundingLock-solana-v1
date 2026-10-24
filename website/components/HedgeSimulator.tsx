@@ -87,7 +87,7 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
   };
 
   return (
-    <div className="space-y-8 max-w-5xl mx-auto pb-16 font-sans">
+    <div className="dashboard-page space-y-8 max-w-5xl mx-auto pb-16 font-sans">
       {/* 1. Hero Portfolio & Net Cost Display (Exact Image 2 Center Hero Style) */}
       <div className="text-center space-y-3 pt-3">
         <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-black/[0.04] dark:border-white/[0.06] text-xs font-mono text-zinc-600 dark:text-zinc-400 shadow-xs">
@@ -99,14 +99,14 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
           <span className="text-xs font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 font-sans">
             Target Net Funding Cost
           </span>
-          <div className="flex items-baseline justify-center gap-2 text-5xl sm:text-6xl font-extrabold tracking-tight text-zinc-950 dark:text-white font-sans">
+          <div className="flex items-baseline justify-center gap-2 text-5xl sm:text-6xl font-extrabold tracking-tight text-white font-sans">
             <span>{formatCurrency(explanation.netFundingCostCents)}</span>
-            <span className="text-2xl sm:text-3xl font-light text-zinc-400 dark:text-zinc-500">
+            <span className="text-2xl sm:text-3xl font-light text-zinc-400">
               USD
             </span>
           </div>
-          <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 font-mono">
-            Locked at <strong className="text-zinc-900 dark:text-white">+{fixedRatePercent.toFixed(4)}%</strong> per 8h • 0.00% Net Variance • $10k Notional Baseline
+          <p className="text-xs sm:text-sm text-zinc-400 font-mono">
+            Locked at <strong className="text-white">+{fixedRatePercent.toFixed(4)}%</strong> per 8h • 0.00% Net Variance • $10k Notional Baseline
           </p>
         </div>
 
@@ -154,7 +154,7 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
       </div>
 
       {/* 3. Program Escrow Solvency Vault Pill (Directly modeled on Vault Card in Image 2) */}
-      <div className="bg-white dark:bg-zinc-900/90 rounded-[28px] border border-black/[0.05] dark:border-white/[0.08] p-5 luxury-card space-y-4">
+      <div className="dashboard-card bg-white dark:bg-zinc-900/90 rounded-[28px] border border-black/[0.05] dark:border-white/[0.08] p-5 luxury-card space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3.5">
             <div className="h-11 w-11 rounded-2xl bg-zinc-100 dark:bg-zinc-800 border border-black/[0.04] dark:border-white/[0.06] flex items-center justify-center text-zinc-900 dark:text-white shadow-xs">
@@ -215,7 +215,7 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
       {/* 4. Two Sculpted Core Cards Side-by-Side (Matching Image 2's Solana SOL & Tether USDT cards!) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Card 1: Solana SOL-PERP Exposure & Parameters (Exact visual match to Image 2's Solana Card) */}
-        <div className="bg-white dark:bg-zinc-900/90 rounded-[32px] border border-black/[0.05] dark:border-white/[0.08] p-6 luxury-card flex flex-col justify-between space-y-6">
+        <div className="dashboard-card bg-white dark:bg-zinc-900/90 rounded-[32px] border border-black/[0.05] dark:border-white/[0.08] p-6 luxury-card flex flex-col justify-between space-y-6">
           <div className="space-y-5">
             {/* Card Header (Icon, Title & Menu) */}
             <div className="flex items-center justify-between">
@@ -387,7 +387,7 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
         </div>
 
         {/* Card 2: USDC Settlement & Solvency (Exact visual match to Image 2's Tether Card) */}
-        <div className="bg-white dark:bg-zinc-900/90 rounded-[32px] border border-black/[0.05] dark:border-white/[0.08] p-6 luxury-card flex flex-col justify-between space-y-6">
+        <div className="dashboard-card bg-white dark:bg-zinc-900/90 rounded-[32px] border border-black/[0.05] dark:border-white/[0.08] p-6 luxury-card flex flex-col justify-between space-y-6">
           <div className="space-y-5">
             {/* Card Header (Icon, Title & Menu) */}
             <div className="flex items-center justify-between">
@@ -485,7 +485,7 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
           <div className="pt-2">
             <button
               onClick={() => {}}
-              className="w-full py-3 rounded-2xl bg-zinc-950 dark:bg-white hover:opacity-90 text-white dark:text-zinc-950 text-xs font-semibold flex items-center justify-center gap-2 shadow-md transition"
+              className="w-full py-3 rounded-2xl bg-[#7af6a7] hover:bg-[#99f9ba] text-zinc-950 text-xs font-semibold flex items-center justify-center gap-2 shadow-md transition"
             >
               <Lock className="w-3.5 h-3.5" />
               <span>Lock Fixed Rate on Solana</span>
@@ -495,7 +495,7 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
       </div>
 
       {/* 5. 21-Interval Accounting Ledger (Activity / Transaction History in Image 2 Style) */}
-      <div className="bg-white dark:bg-zinc-900/90 rounded-[32px] border border-black/[0.05] dark:border-white/[0.08] p-6 luxury-card space-y-4">
+      <div className="dashboard-card bg-white dark:bg-zinc-900/90 rounded-[32px] border border-black/[0.05] dark:border-white/[0.08] p-6 luxury-card space-y-4">
         <div className="flex items-center justify-between border-b border-black/[0.05] dark:border-white/[0.06] pb-4">
           <div className="flex items-center gap-2.5">
             <h3 className="font-bold text-sm text-zinc-950 dark:text-white font-sans">

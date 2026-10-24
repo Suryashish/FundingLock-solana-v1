@@ -172,26 +172,20 @@ export const ReplayDemo: React.FC = () => {
   };
 
   return (
-    <div className="space-y-8 max-w-6xl mx-auto">
+    <div className="dashboard-page space-y-8 pb-16">
       {/* Header and Reset */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800 pb-4">
+      <div className="dashboard-toolbar">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold tracking-tight text-white">
-              Interactive 7-Day Protocol Replay
-            </h1>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-900 text-zinc-300 border border-zinc-800">
-              Deterministic Demo
-            </span>
-          </div>
-          <p className="text-xs text-zinc-400 mt-1">
+          <span className="dashboard-eyebrow">Protocol walkthrough · deterministic demo</span>
+          <h1>Seven-day protocol replay</h1>
+          <p>
             Observe the complete lifecycle: agreement → deposit → activation → oracle interval updates → net settlement
           </p>
         </div>
 
         <button
           onClick={handleReset}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs font-mono text-zinc-400 hover:text-zinc-200 transition"
+          className="dashboard-control-muted flex items-center gap-1.5 self-start"
         >
           <RotateCcw className="w-3.5 h-3.5" />
           <span>Reset Demo Flow</span>
@@ -213,12 +207,12 @@ export const ReplayDemo: React.FC = () => {
           return (
             <div
               key={s.num}
-              className={`p-3 rounded-lg border text-xs font-mono transition ${
-                isCurrent
-                  ? "bg-zinc-800 border-zinc-600 text-zinc-100 font-bold"
-                  : isPast
-                  ? "bg-zinc-950 border-zinc-800 text-zinc-400"
-                  : "bg-zinc-950/40 border-zinc-900 text-zinc-600"
+                className={`p-3 rounded-2xl border text-xs font-mono transition ${
+                  isCurrent
+                   ? "bg-[#7af6a7] border-[#7af6a7] text-zinc-950 font-bold shadow-[0_10px_30px_rgba(122,246,167,0.12)]"
+                   : isPast
+                   ? "bg-white/10 border-white/15 text-zinc-300"
+                   : "bg-white/[0.04] border-white/[0.08] text-zinc-600"
               }`}
             >
               <div className="flex items-center justify-between">
@@ -231,7 +225,7 @@ export const ReplayDemo: React.FC = () => {
       </div>
 
       {/* Interactive Controls & Status Card */}
-      <div className="p-6 rounded-xl bg-zinc-900/60 border border-zinc-800 space-y-6">
+      <div className="dashboard-dark-card p-5 sm:p-7 rounded-[32px] bg-[#111211] border border-white/10 space-y-6 shadow-[0_18px_50px_rgba(0,0,0,0.2)]">
         {/* Step Content */}
         {step === 1 && (
           <div className="space-y-4">
@@ -513,7 +507,7 @@ export const ReplayDemo: React.FC = () => {
       </div>
 
       {/* Program and Vault Addresses Card */}
-      <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-850 space-y-2 text-xs font-mono text-zinc-400">
+      <div className="dashboard-dark-card p-4 rounded-2xl space-y-2 text-xs font-mono text-zinc-400">
         <div className="text-[10px] uppercase text-zinc-500">Solana Program & PDA Addresses:</div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
           <div>

@@ -65,6 +65,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [copied, setCopied] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [protocolDrawerOpen, setProtocolDrawerOpen] = useState(false);
+  const isDashboard = activeTab !== "overview";
 
   // Countdown timer for next 8h funding epoch (00:00, 08:00, 16:00 UTC)
   const [countdown, setCountdown] = useState<string>("00h 00m 00s");
@@ -167,7 +168,13 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <>
-      <header className="sticky top-0 z-40 backdrop-blur-xl bg-white/80 dark:bg-zinc-950/80 border-b border-black/[0.06] dark:border-white/[0.08] transition-colors duration-200">
+      <header
+        className={`sticky top-0 z-40 backdrop-blur-xl border-b transition-colors duration-200 ${
+          isDashboard
+            ? "dashboard-navigation"
+            : "bg-white/80 dark:bg-zinc-950/80 border-black/[0.06] dark:border-white/[0.08]"
+        }`}
+      >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           {/* Main Top Header Bar */}
           <div className="h-16 flex items-center justify-between gap-3 sm:gap-4">
@@ -176,36 +183,37 @@ export const Navbar: React.FC<NavbarProps> = ({
               className="flex items-center gap-2.5 sm:gap-3 cursor-pointer select-none group"
               onClick={() => onSelectTab("simulator")}
             >
-              <div className="h-10 w-10 rounded-2xl bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 flex items-center justify-center shadow-md shadow-black/10 group-hover:scale-105 transition-transform duration-200">
+              <div className={`dashboard-brand-mark h-10 w-10 rounded-2xl flex items-center justify-center shadow-md shadow-black/10 group-hover:scale-105 transition-transform duration-200 ${isDashboard ? "bg-white text-zinc-950" : "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950"}`}>
                 <Layers className="w-5 h-5 stroke-[2.4]" />
               </div>
               <div>
                 <div className="flex items-center gap-1.5">
-                  <span className="font-extrabold text-base tracking-tight text-zinc-950 dark:text-white">
+                  <span className={`dashboard-brand-title font-extrabold text-base tracking-tight ${isDashboard ? "text-white" : "text-zinc-950 dark:text-white"}`}>
                     FundingLock
                   </span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-black/5 dark:bg-white/10 text-zinc-600 dark:text-zinc-400 font-semibold">
+                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full font-semibold ${isDashboard ? "bg-white/10 text-zinc-300" : "bg-black/5 dark:bg-white/10 text-zinc-600 dark:text-zinc-400"}`}>
                     SOL-PERP
                   </span>
                 </div>
-                <p className="text-[11px] text-zinc-400 dark:text-zinc-500 font-medium hidden sm:block">
+                <p className={`dashboard-brand-subtitle text-[11px] font-medium hidden sm:block ${isDashboard ? "text-zinc-400" : "text-zinc-400 dark:text-zinc-500"}`}>
                   Decentralized Fixed-Rate Hedge Escrow
                 </p>
               </div>
             </div>
 
             {/* Center: Floating Capsule Navigation Bar (Segmented Control from Image 2) */}
-            <nav className="hidden lg:flex items-center gap-1 p-1 rounded-full bg-zinc-100/90 dark:bg-zinc-900/90 border border-black/[0.04] dark:border-white/[0.06] shadow-inner">
+            <nav className={`dashboard-nav-capsule hidden lg:flex items-center gap-1 p-1 rounded-full shadow-inner ${isDashboard ? "" : "bg-zinc-100/90 dark:bg-zinc-900/90 border border-black/[0.04] dark:border-white/[0.06]"}`}>
               {navItems.map((item) => {
                 const isActive = activeTab === item.id;
                 return (
                   <button
                     key={item.id}
                     onClick={() => onSelectTab(item.id)}
-                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all duration-200 ${
+                    data-active={isActive}
+                    className={`dashboard-nav-item flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all duration-200 ${
                       isActive
-                        ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 shadow-sm"
-                        : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5"
+                        ? isDashboard ? "bg-white text-zinc-950 shadow-sm" : "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 shadow-sm"
+                        : isDashboard ? "text-zinc-400 hover:text-white hover:bg-white/5" : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5"
                     }`}
                   >
                     {item.icon}
@@ -218,14 +226,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Right: Network Status, Account Capsule, Activity Drawer & Theme Toggle */}
             <div className="flex items-center gap-2 sm:gap-2.5">
               {/* SOL-PERP Live Rate Pill (Streamlined into header) */}
-              <div className="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-full bg-zinc-100/90 dark:bg-zinc-900/90 border border-black/[0.04] dark:border-white/[0.06] text-xs font-mono">
+              <div className={`dashboard-nav-pill hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-mono ${isDashboard ? "" : "bg-zinc-100/90 dark:bg-zinc-900/90 border border-black/[0.04] dark:border-white/[0.06]"}`}>
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="font-bold text-zinc-950 dark:text-white">SOL-PERP</span>
-                <span className="text-zinc-600 dark:text-zinc-300">$184.20</span>
-                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">+0.0200%</span>
-                <span className="text-zinc-300 dark:text-zinc-700">|</span>
+                <span className={`font-bold ${isDashboard ? "text-white" : "text-zinc-950 dark:text-white"}`}>SOL-PERP</span>
+                <span className={isDashboard ? "text-zinc-300" : "text-zinc-600 dark:text-zinc-300"}>$184.20</span>
+                <span className="text-emerald-400 font-semibold">+0.0200%</span>
+                <span className={isDashboard ? "text-white/20" : "text-zinc-300 dark:text-zinc-700"}>|</span>
                 <Clock className="w-3 h-3 text-zinc-400" />
-                <span className="text-zinc-500 text-[11px]">{countdown}</span>
+                <span className={isDashboard ? "dashboard-nav-pill-muted text-[11px]" : "text-zinc-500 text-[11px]"}>{countdown}</span>
               </div>
 
               {/* Monochromatic Account Capsule (Exact Image 2 Style - No Purple Button!) */}
@@ -234,16 +242,16 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className="relative" ref={accountMenuRef}>
                     <button
                       onClick={() => setAccountMenuOpen(!accountMenuOpen)}
-                      className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-black/[0.06] dark:border-white/[0.08] hover:border-black/20 dark:hover:border-white/20 text-xs font-mono shadow-sm transition group"
+                      className={`dashboard-nav-pill flex items-center gap-2 px-3 py-1.5 rounded-full border hover:border-white/30 text-xs font-mono shadow-sm transition group ${isDashboard ? "" : "bg-zinc-100 dark:bg-zinc-900 border-black/[0.06] dark:border-white/[0.08] hover:border-black/20 dark:hover:border-white/20"}`}
                     >
                       <div className="w-5 h-5 rounded-full bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 flex items-center justify-center text-[10px] font-extrabold shadow-sm">
                         S
                       </div>
-                      <span className="font-bold text-zinc-950 dark:text-white hidden sm:inline">
+                        <span className={`font-bold hidden sm:inline ${isDashboard ? "text-white" : "text-zinc-950 dark:text-white"}`}>
                         {balance !== null ? `${balance.toFixed(2)} SOL` : "0.00 SOL"}
                       </span>
                       <span className="text-zinc-300 dark:text-zinc-700 hidden sm:inline">|</span>
-                      <span className="text-zinc-600 dark:text-zinc-300 font-medium">
+                        <span className={`font-medium ${isDashboard ? "text-zinc-300" : "text-zinc-600 dark:text-zinc-300"}`}>
                         {publicKey.toBase58().slice(0, 4)}...{publicKey.toBase58().slice(-4)}
                       </span>
                       <ChevronDown
@@ -322,7 +330,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 ) : (
                   <button
                     onClick={() => setVisible(true)}
-                    className="flex items-center gap-2 px-4 py-2 rounded-full bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-xs font-semibold shadow-md shadow-black/10 hover:opacity-90 active:scale-98 transition"
+                      className={`dashboard-nav-connect flex items-center gap-2 px-4 py-2 rounded-full text-xs font-semibold shadow-md shadow-black/10 hover:opacity-90 active:scale-98 transition ${isDashboard ? "" : "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950"}`}
                   >
                     <Wallet className="w-3.5 h-3.5" />
                     <span>Connect Wallet</span>
@@ -333,7 +341,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               {/* Protocol Spec Drawer Button (Matching Image 2's Right Menu Button) */}
               <button
                 onClick={() => setProtocolDrawerOpen(true)}
-                className="h-9 w-9 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-black/[0.04] dark:border-white/[0.06] flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white shadow-sm hover:scale-105 active:scale-95 transition"
+                className={`dashboard-nav-action h-9 w-9 rounded-full border flex items-center justify-center shadow-sm hover:scale-105 active:scale-95 transition ${isDashboard ? "" : "bg-zinc-100 dark:bg-zinc-900 border-black/[0.04] dark:border-white/[0.06] text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"}`}
                 title="View Protocol Specs & PDAs"
               >
                 <SlidersHorizontal className="w-4 h-4" />
@@ -342,7 +350,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               {/* Dark / Light Theme Toggle Button */}
               <button
                 onClick={handleToggleTheme}
-                className="h-9 w-9 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-black/[0.04] dark:border-white/[0.06] flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white shadow-sm hover:scale-105 active:scale-95 transition"
+                className={`dashboard-nav-action h-9 w-9 rounded-full border flex items-center justify-center shadow-sm hover:scale-105 active:scale-95 transition ${isDashboard ? "" : "bg-zinc-100 dark:bg-zinc-900 border-black/[0.04] dark:border-white/[0.06] text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"}`}
                 title="Toggle Light / Dark Mode"
               >
                 {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -358,11 +366,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   key={item.id}
                   onClick={() => onSelectTab(item.id)}
-                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all duration-200 ${
-                    isActive
-                      ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 shadow-sm"
-                      : "text-zinc-600 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-900"
-                  }`}
+                    data-active={isActive}
+                    className={`dashboard-nav-item flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all duration-200 ${
+                      isActive
+                        ? isDashboard ? "bg-white text-zinc-950 shadow-sm" : "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 shadow-sm"
+                        : isDashboard ? "text-zinc-400 bg-white/10" : "text-zinc-600 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-900"
+                    }`}
                 >
                   {item.icon}
                   <span>{item.label}</span>
