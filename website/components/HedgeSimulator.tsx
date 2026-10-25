@@ -1,7 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowRight, ArrowUpRight, ChevronDown, RotateCcw } from "lucide-react";
+import Link from "next/link";
+import {
+  ArrowRight,
+  ArrowUpRight,
+  ChevronDown,
+  Play,
+  RotateCcw,
+} from "lucide-react";
 import {
   BINANCE_SOL_CONFIG,
   type ContractTerms,
@@ -105,6 +112,15 @@ export function HedgeSimulator({
       <PageHeader
         title="Plan your funding"
         description="See what you could pay with a fixed-rate hedge before you create an offer."
+        actions={
+          <Link
+            href="/contract-flow"
+            className="app-button app-button-secondary"
+          >
+            <Play size={14} />
+            Try guided example
+          </Link>
+        }
       />
       <div className="simple-calculator">
         <Panel

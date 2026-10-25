@@ -55,7 +55,7 @@ const WorkspaceContext = createContext<{
 export function TradingWorkspace({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [isDark, setIsDark] = useState(false);
+  const [isDark, setIsDark] = useState(true);
   const [observations, setObservationState] = useState<
     FundingObservation[] | null
   >(null);
