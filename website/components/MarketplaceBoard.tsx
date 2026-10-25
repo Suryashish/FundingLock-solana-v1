@@ -6,6 +6,7 @@ import {
   BINANCE_SOL_CONFIG,
   ContractTerms,
   PositionSide,
+  FundingOfferDraft,
 } from "../lib/domain/types.ts";
 import { calculateCollateralRequirement } from "../lib/domain/collateral.ts";
 import { formatCurrency, formatRatePercent } from "../lib/domain/funding.ts";
@@ -13,15 +14,11 @@ import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import {
   ArrowRight,
-  ArrowUpRight,
   Check,
-  Clock3,
-  LockKeyhole,
+  ChevronDown,
   Plus,
   RefreshCw,
-  ShieldCheck,
   Store,
-  Users,
   Wallet,
 } from "lucide-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
@@ -29,7 +26,6 @@ import {
   AppDialog,
   Notice,
   PageHeader,
-  Panel,
   SegmentedControl,
 } from "./ApplicationUI";
 import {
@@ -50,6 +46,7 @@ import {
 
 interface MarketplaceBoardProps {
   onAcceptOfferClick?: (offer: ContractTerms) => void;
+  initialDraft?: FundingOfferDraft | null;
 }
 
 const DEFAULT_SAMPLE_OFFERS: ContractTerms[] = [
@@ -108,6 +105,7 @@ const DEFAULT_SAMPLE_OFFERS: ContractTerms[] = [
 
 export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
   onAcceptOfferClick,
+  initialDraft,
 }) => {
   const wallet = useWallet();
   const { setVisible } = useWalletModal();
@@ -117,13 +115,24 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
   const [isLoadingOffers, setIsLoadingOffers] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [filterSide, setFilterSide] = useState<"all" | "long" | "short">("all");
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(Boolean(initialDraft));
+  const [resumeAfterConnect, setResumeAfterConnect] = useState(false);
+  const createDialogOpen =
+    showCreateModal || (resumeAfterConnect && Boolean(publicKey));
+  const [reviewOffer, setReviewOffer] = useState<ContractTerms | null>(null);
   const [acceptedOfferId, setAcceptedOfferId] = useState<string | null>(null);
 
   // Create offer state
-  const [newSide, setNewSide] = useState<PositionSide>("long");
-  const [newNotional, setNewNotional] = useState<number>(100);
-  const [newFixedRate, setNewFixedRate] = useState<number>(0.02);
+  const [newSide] = useState<PositionSide>(
+    initialDraft?.positionSide ?? "long",
+  );
+  const [newNotional, setNewNotional] = useState<number>(
+    (initialDraft?.notionalCents ?? 10000) / 100,
+  );
+  const [newFixedRate, setNewFixedRate] = useState<number>(
+    (initialDraft?.fixedRatePpm ?? 200) / 10000,
+  );
+  const newIntervalCount = initialDraft?.intervalCount ?? 21;
   const [onChainContracts, setOnChainContracts] = useState<
     Record<string, OnChainContractState>
   >({});
@@ -193,18 +202,18 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
       marketSymbol: "SOL-PERP",
       venueId: "BINANCE_PERP",
       positionSide: newSide,
-      notionalCents: newNotional * 100,
+      notionalCents: Math.round(newNotional * 100),
       fixedRatePpm: Math.round(newFixedRate * 10000),
-      intervalCount: 21,
+      intervalCount: newIntervalCount,
       intervalSeconds: 28800,
       startTime: FIXTURE_START_TIME,
-      endTime: FIXTURE_START_TIME + 21 * 28800,
+      endTime: FIXTURE_START_TIME + newIntervalCount * 28800,
       minRatePpm: BINANCE_SOL_CONFIG.minRatePpm,
       maxRatePpm: BINANCE_SOL_CONFIG.maxRatePpm,
       collateralMint: "SOL",
     };
     return calculateCollateralRequirement(terms, BINANCE_SOL_CONFIG);
-  }, [newSide, newNotional, newFixedRate]);
+  }, [newSide, newNotional, newFixedRate, newIntervalCount]);
 
   const handleCreateOffer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -271,9 +280,9 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
           marketSymbol: BINANCE_SOL_CONFIG.marketSymbol,
           buyer: publicKey,
           positionSide: newSide,
-          notionalCents: newNotional * 100,
+          notionalCents: Math.round(newNotional * 100),
           fixedRatePpm: Math.round(newFixedRate * 10000),
-          intervalCount: 21,
+          intervalCount: newIntervalCount,
           startTime: Math.floor(Date.now() / 1000),
         }),
       );
@@ -303,12 +312,12 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
         marketSymbol: "SOL-PERP",
         venueId: "BINANCE_PERP",
         positionSide: newSide,
-        notionalCents: newNotional * 100,
+        notionalCents: Math.round(newNotional * 100),
         fixedRatePpm: Math.round(newFixedRate * 10000),
-        intervalCount: 21,
+        intervalCount: newIntervalCount,
         intervalSeconds: 28800,
         startTime: FIXTURE_START_TIME,
-        endTime: FIXTURE_START_TIME + 21 * 28800,
+        endTime: FIXTURE_START_TIME + newIntervalCount * 28800,
         minRatePpm: BINANCE_SOL_CONFIG.minRatePpm,
         maxRatePpm: BINANCE_SOL_CONFIG.maxRatePpm,
         collateralMint: "SOL",
@@ -318,6 +327,7 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
 
       setOffers((prev) => [newOffer, ...prev]);
       setShowCreateModal(false);
+      setResumeAfterConnect(false);
       setActionStatus({
         state: "success",
         message: `Offer ${contractId} created on Testnet! Tx: ${formatSignature(signature)}.`,
@@ -425,9 +435,9 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
     return o.positionSide === filterSide;
   });
 
-  const liveOfferCount = offers.filter((offer) =>
-    Boolean(onChainContracts[offer.contractId]),
-  ).length;
+  const hasExamples = offers.some((offer) =>
+    offer.contractId.startsWith("OFF-BENCH"),
+  );
   const actionNotice = actionStatus.message && (
     <Notice
       tone={
@@ -442,50 +452,63 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
       {actionStatus.message}
     </Notice>
   );
-  const offerAction = (offer: ContractTerms) => {
-    const example = offer.contractId.startsWith("OFF-BENCH");
-    const matched =
-      acceptedOfferId === offer.contractId || offer.status === "Matched";
-    if (!matched && offer.status && offer.status !== "Open") {
-      return <span className="app-badge">{offer.status}</span>;
+  const closeCreate = () => {
+    if (actionStatus.state !== "pending") {
+      setShowCreateModal(false);
+      setResumeAfterConnect(false);
     }
-    return matched ? (
-      <span className="app-badge app-badge-accent">
-        <Check size={12} />
-        Matched
-      </span>
-    ) : (
+  };
+  const days = (offer: ContractTerms) => offer.intervalCount / 3;
+  const offerAction = (offer: ContractTerms) => {
+    if (acceptedOfferId === offer.contractId || offer.status === "Matched")
+      return (
+        <span className="app-badge app-badge-accent">
+          <Check size={12} />
+          Matched
+        </span>
+      );
+    if (offer.status && offer.status !== "Open")
+      return <span className="app-badge">{offer.status}</span>;
+    if (
+      publicKey &&
+      onChainContracts[offer.contractId]?.buyer.equals(publicKey)
+    )
+      return <span className="app-badge">Your offer</span>;
+    const example = offer.contractId.startsWith("OFF-BENCH");
+    return (
       <button
-        className={`app-button ${example ? "app-button-secondary" : "app-button-primary"}`}
+        className="app-button app-button-secondary"
         disabled={actionStatus.state === "pending"}
-        onClick={() => handleAccept(offer)}
+        onClick={() =>
+          example ? void handleAccept(offer) : setReviewOffer(offer)
+        }
       >
-        {example ? "Try example" : "Accept offer"}
-        {example ? <ArrowUpRight size={13} /> : <ArrowRight size={13} />}
+        {example ? "Try example" : "View offer"}
+        <ArrowRight size={13} />
       </button>
     );
   };
 
   return (
-    <div className="app-page">
+    <div className="app-page simple-page">
       <PageHeader
-        eyebrow="FIND YOUR COUNTERPARTY"
-        title="Marketplace"
-        description="Explore fixed funding offers. Choose the terms that work for your position."
+        title="Find an offer"
+        description="Create an offer for your position, or review another trader’s offer."
         actions={
           <button
             className="app-button app-button-primary"
             onClick={() => {
               setActionStatus({ state: "idle", message: "" });
+              setResumeAfterConnect(false);
               setShowCreateModal(true);
             }}
           >
-            <Plus size={16} />
+            <Plus size={15} />
             Create an offer
           </button>
         }
       />
-      {!showCreateModal && actionNotice}
+      {!createDialogOpen && !reviewOffer && actionNotice}
       <div className="market-toolbar">
         <SegmentedControl
           label="Filter offers"
@@ -493,54 +516,32 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
           onChange={setFilterSide}
           options={[
             { value: "all", label: "All offers" },
-            { value: "long", label: "Long hedges" },
-            { value: "short", label: "Short hedges" },
+            { value: "long", label: "Long" },
+            { value: "short", label: "Short" },
           ]}
         />
-        <div className="market-summary">
-          <span>
-            <strong className="app-secondary">{filteredOffers.length}</strong>{" "}
-            offers shown
-          </span>
-          <span className="app-badge">
-            {liveOfferCount > 0
-              ? `${liveOfferCount} Testnet contracts`
-              : "Example offers"}
-          </span>
-          <button
-            className="app-icon-button"
-            aria-label="Refresh offers"
-            title="Refresh offers"
-            onClick={() => void loadOnChainOffers()}
-            disabled={isLoadingOffers}
-          >
-            <RefreshCw
-              size={15}
-              className={isLoadingOffers ? "app-spinning" : ""}
-            />
-          </button>
-        </div>
+        <button
+          className="simple-inline-link"
+          onClick={() => void loadOnChainOffers()}
+          disabled={isLoadingOffers}
+        >
+          <RefreshCw
+            size={13}
+            className={isLoadingOffers ? "app-spinning" : ""}
+          />
+          {isLoadingOffers ? "Updating…" : "Refresh"}
+        </button>
       </div>
       <section
         className="app-panel"
         aria-label="Funding offers"
         aria-busy={isLoadingOffers}
       >
-        <div className="app-panel-heading">
-          <div>
-            <h2>SOL-PERP funding offers</h2>
-            <p>Fixed rates per 8-hour interval · 7-day contracts</p>
-          </div>
-          <span className="app-badge">
-            <Clock3 size={11} />
-            21 intervals
-          </span>
-        </div>
         {filteredOffers.length === 0 ? (
           <div className="app-empty">
-            <Store size={27} />
-            <h3>No offers for this position</h3>
-            <p>Try another filter or create an offer with your terms.</p>
+            <Store size={25} />
+            <h2>No offers for this position yet</h2>
+            <p>Choose another filter or create an offer.</p>
           </div>
         ) : (
           <>
@@ -548,200 +549,106 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
               <table className="app-table">
                 <thead>
                   <tr>
-                    <th>Market / offer</th>
-                    <th>Side</th>
-                    <th>Notional</th>
-                    <th>Fixed rate</th>
-                    <th>Collateral</th>
+                    <th>Position</th>
+                    <th>Position size</th>
+                    <th>Fixed rate / 8h</th>
+                    <th>Duration</th>
                     <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredOffers.map((offer) => {
-                    const req = calculateCollateralRequirement(
-                      offer,
-                      BINANCE_SOL_CONFIG,
-                    );
-                    const example = offer.contractId.startsWith("OFF-BENCH");
-                    return (
-                      <tr key={offer.contractId}>
-                        <td>
-                          <strong>SOL-PERP</strong>
-                          <small>
-                            {offer.contractId} ·{" "}
-                            {example ? "Example" : "Testnet"}
-                          </small>
-                        </td>
-                        <td>
-                          <span
-                            className={`app-badge ${offer.positionSide === "long" ? "app-badge-accent" : "app-badge-blue"}`}
-                          >
-                            {offer.positionSide === "long" ? "Long" : "Short"}
-                          </span>
-                        </td>
-                        <td>
-                          <strong>{formatCurrency(offer.notionalCents)}</strong>
-                          <small>USD notional</small>
-                        </td>
-                        <td className="app-accent">
-                          <strong>
-                            {formatRatePercent(offer.fixedRatePpm)}
-                          </strong>
-                          <small>per 8h</small>
-                        </td>
-                        <td>
-                          {formatCurrency(req.buyerCollateralCents)}
-                          <small>
-                            Hedger ·{" "}
-                            {formatCurrency(req.riskTakerCollateralCents)}{" "}
-                            counterparty
-                          </small>
-                        </td>
-                        <td>{offerAction(offer)}</td>
-                      </tr>
-                    );
-                  })}
+                  {filteredOffers.map((offer) => (
+                    <tr key={offer.contractId}>
+                      <td>
+                        <span
+                          className={`app-badge ${offer.positionSide === "long" ? "app-badge-accent" : "app-badge-blue"}`}
+                        >
+                          {offer.positionSide === "long" ? "Long" : "Short"}
+                        </span>
+                        {offer.contractId.startsWith("OFF-BENCH") && (
+                          <small>Example</small>
+                        )}
+                      </td>
+                      <td>
+                        <strong>{formatCurrency(offer.notionalCents)}</strong>
+                      </td>
+                      <td className="app-accent">
+                        <strong>{formatRatePercent(offer.fixedRatePpm)}</strong>
+                      </td>
+                      <td>{days(offer)} days</td>
+                      <td>{offerAction(offer)}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
             <div className="market-cards">
-              {filteredOffers.map((offer) => {
-                const req = calculateCollateralRequirement(
-                  offer,
-                  BINANCE_SOL_CONFIG,
-                );
-                return (
-                  <article className="market-card" key={offer.contractId}>
-                    <div className="app-row-between">
-                      <div>
-                        <span className="market-card-id">SOL-PERP</span>
-                        <p className="app-muted app-small">
-                          {offer.contractId.startsWith("OFF-BENCH")
-                            ? "Example offer"
-                            : offer.contractId}
-                        </p>
-                      </div>
-                      <span
-                        className={`app-badge ${offer.positionSide === "long" ? "app-badge-accent" : "app-badge-blue"}`}
-                      >
-                        {offer.positionSide === "long"
-                          ? "Long hedge"
-                          : "Short hedge"}
-                      </span>
+              {filteredOffers.map((offer) => (
+                <article className="market-card" key={offer.contractId}>
+                  <div className="app-row-between">
+                    <strong>
+                      {offer.positionSide === "long" ? "Long" : "Short"}{" "}
+                      SOL-PERP
+                    </strong>
+                    {offer.contractId.startsWith("OFF-BENCH") && (
+                      <span className="app-badge">Example</span>
+                    )}
+                  </div>
+                  <dl className="app-detail-list">
+                    <div>
+                      <dt>Position size</dt>
+                      <dd>{formatCurrency(offer.notionalCents)}</dd>
                     </div>
-                    <dl className="app-detail-list">
-                      <div>
-                        <dt>Notional size</dt>
-                        <dd>{formatCurrency(offer.notionalCents)}</dd>
-                      </div>
-                      <div>
-                        <dt>Fixed rate / 8h</dt>
-                        <dd className="app-accent">
-                          {formatRatePercent(offer.fixedRatePpm)}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt>Duration</dt>
-                        <dd>7 days · 21 intervals</dd>
-                      </div>
-                      <div>
-                        <dt>Hedger collateral</dt>
-                        <dd>{formatCurrency(req.buyerCollateralCents)}</dd>
-                      </div>
-                      <div>
-                        <dt>Counterparty collateral</dt>
-                        <dd>{formatCurrency(req.riskTakerCollateralCents)}</dd>
-                      </div>
-                    </dl>
-                    {offerAction(offer)}
-                  </article>
-                );
-              })}
+                    <div>
+                      <dt>Fixed rate / 8h</dt>
+                      <dd>{formatRatePercent(offer.fixedRatePpm)}</dd>
+                    </div>
+                    <div>
+                      <dt>Duration</dt>
+                      <dd>{days(offer)} days</dd>
+                    </div>
+                  </dl>
+                  {offerAction(offer)}
+                </article>
+              ))}
             </div>
           </>
         )}
-        <div className="app-table-caption">
-          <span>
-            {isLoadingOffers
-              ? "Refreshing Testnet offers…"
-              : loadFailed
-                ? "Testnet could not be refreshed. Example offers remain available."
-                : liveOfferCount
-                  ? "Contract data loaded from Solana Testnet."
-                  : "Example offers help you explore the contract walkthrough."}
-          </span>
-          <span>SOL-PERP</span>
-        </div>
       </section>
-      <Notice>
-        <strong>Explore before you connect.</strong> Example offers open a
-        simulated walkthrough. Creating or accepting a Testnet contract requires
-        a connected wallet and Testnet SOL.
-      </Notice>
-      <Panel
-        title="From an offer to a fixed rate"
-        description="A clear agreement between two counterparties."
-      >
-        <div className="market-how-it-works">
-          {[
-            {
-              icon: Users,
-              title: "Agree on the terms",
-              text: "Match a position size, fixed rate, and contract duration.",
-            },
-            {
-              icon: LockKeyhole,
-              title: "Post collateral",
-              text: "Both counterparties fund the contract before activation.",
-            },
-            {
-              icon: ShieldCheck,
-              title: "Settle the difference",
-              text: "The contract compares observed funding with the agreed rate.",
-            },
-          ].map((item) => (
-            <div key={item.title}>
-              <span className="app-step-icon">
-                <item.icon size={15} />
-              </span>
-              <div>
-                <h3>{item.title}</h3>
-                <p>{item.text}</p>
-              </div>
-            </div>
-          ))}
+      <p className="simple-example-note">
+        {loadFailed ? "Couldn’t refresh Testnet offers. " : ""}
+        {hasExamples
+          ? "Example offers open a walkthrough without a wallet."
+          : "View an offer to review its terms before accepting."}
+      </p>
+      <details className="app-disclosure">
+        <summary>
+          <span>What happens when I accept an offer?</span>
+          <ChevronDown size={16} />
+        </summary>
+        <div className="app-panel-body simple-help-copy">
+          <p>
+            You become the counterparty to the trader who created the offer.
+            Both of you deposit collateral before the hedge starts. At the end,
+            the contract pays the funding difference and returns unused
+            collateral.
+          </p>
+          <p>
+            Your result is the opposite of the offer creator’s. Review the rate,
+            position size, and required deposit before you accept.
+          </p>
         </div>
-      </Panel>
-      {showCreateModal && (
+      </details>
+      {createDialogOpen && (
         <AppDialog
-          title="Create a funding offer"
-          description="Set your terms for a 7-day SOL-PERP hedge on Testnet."
-          onClose={() => {
-            if (actionStatus.state !== "pending") setShowCreateModal(false);
-          }}
+          title={initialDraft ? "Review your offer" : "Create an offer"}
+          description={`Long SOL-PERP · ${newIntervalCount / 3} days · Solana Testnet`}
+          onClose={closeCreate}
         >
           <form onSubmit={handleCreateOffer} className="app-stack-small">
             {actionNotice}
             <div className="app-field">
-              <span className="app-field-label">Position direction</span>
-              <SegmentedControl
-                label="Offer position direction"
-                value={newSide}
-                onChange={setNewSide}
-                options={[
-                  { value: "long", label: "Long hedge" },
-                  { value: "short", label: "Short hedge" },
-                ]}
-              />
-              {newSide === "short" && (
-                <small>
-                  Short positions can be explored in the simulator. The current
-                  Testnet contract supports long offers.
-                </small>
-              )}
-            </div>
-            <div className="app-field">
-              <label htmlFor="offer-notional">Notional size</label>
+              <label htmlFor="offer-notional">Position size</label>
               <div className="app-input-unit">
                 <input
                   id="offer-notional"
@@ -749,7 +656,7 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
                   type="number"
                   min={25}
                   max={50000}
-                  step={25}
+                  step={0.01}
                   value={newNotional}
                   onChange={(event) =>
                     setNewNotional(Number(event.target.value))
@@ -768,7 +675,7 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
                   type="number"
                   min={-0.5}
                   max={0.5}
-                  step={0.005}
+                  step={0.0001}
                   value={newFixedRate}
                   onChange={(event) =>
                     setNewFixedRate(Number(event.target.value))
@@ -778,36 +685,26 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
                 <span>% / 8h</span>
               </div>
             </div>
-            <div className="app-notice">
-              <ShieldCheck size={17} />
-              <div>
-                <strong>Estimated collateral</strong>
-                <dl className="app-detail-list" style={{ marginTop: 12 }}>
-                  <div>
-                    <dt>Hedger</dt>
-                    <dd>
-                      {formatCurrency(previewCollateral.buyerCollateralCents)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Counterparty</dt>
-                    <dd>
-                      {formatCurrency(
-                        previewCollateral.riskTakerCollateralCents,
-                      )}
-                    </dd>
-                  </div>
-                </dl>
-                <span className="app-muted">
-                  USD estimates. Deposits are made in Testnet SOL.
-                </span>
-              </div>
+            <div className="simple-offer-summary">
+              <span>Estimated deposit after matching</span>
+              <strong>
+                {formatCurrency(previewCollateral.buyerCollateralCents)}
+              </strong>
+              <small>
+                Testnet deposit estimate:{" "}
+                {(previewCollateral.buyerCollateralCents / 10000).toFixed(4)}{" "}
+                SOL.
+              </small>
             </div>
+            <p className="simple-next-step">
+              Publishing creates an offer. Your hedge starts only after a
+              counterparty accepts and both deposits are funded.
+            </p>
             <div className="app-dialog-footer">
               <button
                 type="button"
                 className="app-button app-button-secondary"
-                onClick={() => setShowCreateModal(false)}
+                onClick={closeCreate}
                 disabled={actionStatus.state === "pending"}
               >
                 Cancel
@@ -821,8 +718,8 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
                   }
                 >
                   {actionStatus.state === "pending"
-                    ? "Preparing offer…"
-                    : "Publish on Testnet"}
+                    ? "Publishing…"
+                    : "Publish offer"}
                   <ArrowRight size={14} />
                 </button>
               ) : (
@@ -831,15 +728,91 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
                   className="app-button app-button-primary"
                   onClick={() => {
                     setShowCreateModal(false);
+                    setResumeAfterConnect(true);
                     setVisible(true);
                   }}
                 >
-                  <Wallet size={15} />
-                  Connect wallet
+                  <Wallet size={14} />
+                  Connect wallet to continue
                 </button>
               )}
             </div>
           </form>
+        </AppDialog>
+      )}
+      {reviewOffer && (
+        <AppDialog
+          title="Review this offer"
+          description="You would take the other side of this funding agreement."
+          onClose={() => {
+            if (actionStatus.state !== "pending") setReviewOffer(null);
+          }}
+        >
+          <div className="app-stack-small">
+            {actionNotice}
+            <dl className="app-detail-list">
+              <div>
+                <dt>Market</dt>
+                <dd>SOL-PERP</dd>
+              </div>
+              <div>
+                <dt>Creator’s position</dt>
+                <dd>
+                  {reviewOffer.positionSide === "long" ? "Long" : "Short"}
+                </dd>
+              </div>
+              <div>
+                <dt>Position size</dt>
+                <dd>{formatCurrency(reviewOffer.notionalCents)}</dd>
+              </div>
+              <div>
+                <dt>Fixed rate per 8 hours</dt>
+                <dd>{formatRatePercent(reviewOffer.fixedRatePpm)}</dd>
+              </div>
+              <div>
+                <dt>Duration</dt>
+                <dd>{days(reviewOffer)} days</dd>
+              </div>
+              <div>
+                <dt>Your estimated collateral</dt>
+                <dd>
+                  {formatCurrency(
+                    calculateCollateralRequirement(
+                      reviewOffer,
+                      BINANCE_SOL_CONFIG,
+                    ).riskTakerCollateralCents,
+                  )}
+                </dd>
+              </div>
+            </dl>
+            <p className="simple-next-step">
+              Collateral is deposited separately after matching. These USD
+              estimates are funded in Testnet SOL.
+            </p>
+            {publicKey ? (
+              <button
+                className="app-button app-button-primary"
+                disabled={actionStatus.state === "pending"}
+                onClick={() => void handleAccept(reviewOffer)}
+              >
+                {actionStatus.state === "pending"
+                  ? "Accepting…"
+                  : "Accept this offer"}
+                <ArrowRight size={14} />
+              </button>
+            ) : (
+              <button
+                className="app-button app-button-primary"
+                onClick={() => {
+                  setReviewOffer(null);
+                  setVisible(true);
+                }}
+              >
+                <Wallet size={14} />
+                Connect wallet
+              </button>
+            )}
+          </div>
         </AppDialog>
       )}
     </div>

@@ -4,7 +4,6 @@ import { HeroFundingVisual } from "../components/HeroFundingVisual";
 import { LandingProductPreview } from "../components/LandingProductPreview";
 import {
   ArrowDown,
-  ArrowRight,
   ArrowUpRight,
   ChartNoAxesCombined,
   ChevronDown,
@@ -17,9 +16,9 @@ import {
 } from "lucide-react";
 
 const appLinks = [
-  { href: "/simulator", label: "Simulator" },
-  { href: "/marketplace", label: "Marketplace" },
-  { href: "/protocol", label: "Protocol guide" },
+  { href: "/simulator", label: "Calculator" },
+  { href: "/marketplace", label: "Offers" },
+  { href: "/protocol", label: "Help" },
 ];
 
 function Brand() {
@@ -60,9 +59,8 @@ export default function Home() {
           <Brand />
           <nav className="landing-nav" aria-label="Main navigation">
             <a href="#how-it-works">How it works</a>
-            <a href="#why-fundinglock">Why FundingLock</a>
             <Link href="/protocol">
-              Resources <ArrowUpRight size={13} />
+              Help <ArrowUpRight size={13} />
             </Link>
           </nav>
           <Link
@@ -76,8 +74,6 @@ export default function Home() {
               <Menu size={21} />
             </summary>
             <nav aria-label="Mobile navigation">
-              <a href="#how-it-works">How it works</a>
-              <a href="#why-fundinglock">Why FundingLock</a>
               {appLinks.map((link) => (
                 <Link key={link.href} href={link.href}>
                   {link.label}
@@ -226,7 +222,7 @@ export default function Home() {
                 </div>
               </div>
               <Link href="/marketplace">
-                Explore the marketplace <ArrowUpRight size={16} />
+                Browse offers <ArrowUpRight size={16} />
               </Link>
             </article>
             <article className="landing-feature-card">
@@ -254,7 +250,7 @@ export default function Home() {
                 </span>
               </div>
               <Link href="/contract-flow">
-                Walk through the contract <ArrowUpRight size={16} />
+                Try an example <ArrowUpRight size={16} />
               </Link>
             </article>
           </div>
@@ -367,9 +363,6 @@ export default function Home() {
               {link.label}
             </Link>
           ))}
-          <Link href="/rates">
-            Historical rates <ArrowRight size={13} />
-          </Link>
         </nav>
         <div className="landing-footer-bottom">
           <span>© 2026 FundingLock</span>

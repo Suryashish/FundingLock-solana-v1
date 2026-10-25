@@ -5,20 +5,20 @@
  * rate conventions, contract terms, oracle observations, and settlement records.
  */
 
-export type PositionSide = 'long' | 'short';
+export type PositionSide = "long" | "short";
 
-export type VenueId = 'BINANCE_PERP';
+export type VenueId = "BINANCE_PERP";
 
 export type ContractStatus =
-  | 'Open'
-  | 'Matched'
-  | 'Funded'
-  | 'Active'
-  | 'Settling'
-  | 'Settled'
-  | 'Cancelled'
-  | 'Paused'
-  | 'Defaulted';
+  | "Open"
+  | "Matched"
+  | "Funded"
+  | "Active"
+  | "Settling"
+  | "Settled"
+  | "Cancelled"
+  | "Paused"
+  | "Defaulted";
 
 export interface MarketVenueConfig {
   venueId: VenueId;
@@ -32,13 +32,13 @@ export interface MarketVenueConfig {
   maxDurationDays: number; // 30
   maxNotionalCents: number; // $1,000,000.00 (100,000,000 cents)
   safetyBufferBps: number; // 500 (5% safety buffer for collateral)
-  timeConvention: 'start_inclusive_end_exclusive';
+  timeConvention: "start_inclusive_end_exclusive";
 }
 
 export const BINANCE_SOL_CONFIG: MarketVenueConfig = {
-  venueId: 'BINANCE_PERP',
-  venueName: 'Binance Perpetual (SOLUSDT)',
-  marketSymbol: 'SOL-PERP',
+  venueId: "BINANCE_PERP",
+  venueName: "Binance Perpetual (SOLUSDT)",
+  marketSymbol: "SOL-PERP",
   intervalSeconds: 28800, // 8 hours
   intervalsPerDay: 3,
   rateScale: 1_000_000, // 1e6 Parts Per Million
@@ -47,7 +47,7 @@ export const BINANCE_SOL_CONFIG: MarketVenueConfig = {
   maxDurationDays: 30,
   maxNotionalCents: 100_000_000, // $1,000,000.00
   safetyBufferBps: 500, // 5%
-  timeConvention: 'start_inclusive_end_exclusive',
+  timeConvention: "start_inclusive_end_exclusive",
 };
 
 export interface FundingObservation {
@@ -92,7 +92,7 @@ export interface IntervalSettlementRecord {
   fixedFundingCostCents: number;
   intervalSettlementCents: number;
   cumulativeSettlementCents: number;
-  status: 'pending' | 'recorded' | 'missing' | 'disputed';
+  status: "pending" | "recorded" | "missing" | "disputed";
 }
 
 export interface SettlementExplanation {
@@ -114,3 +114,10 @@ export interface SettlementExplanation {
   defaultShortfallCents?: number;
 }
 
+/** Calculator terms carried into the offer form without changing units. */
+export interface FundingOfferDraft {
+  positionSide: PositionSide;
+  notionalCents: number;
+  fixedRatePpm: number;
+  intervalCount: number;
+}

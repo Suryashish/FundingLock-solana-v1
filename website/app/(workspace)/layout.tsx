@@ -1,5 +1,10 @@
+import "../simple.css";
 import { TradingWorkspace } from "../../components/TradingWorkspace";
 
-export default function WorkspaceLayout({ children }: { children: React.ReactNode }) {
+export default function WorkspaceLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return <TradingWorkspace>{children}</TradingWorkspace>;
 }

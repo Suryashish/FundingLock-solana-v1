@@ -12,13 +12,7 @@ import {
   Clock3,
   Database,
 } from "lucide-react";
-import {
-  Notice,
-  PageHeader,
-  Panel,
-  SegmentedControl,
-  StatCard,
-} from "./ApplicationUI";
+import { PageHeader, Panel, SegmentedControl, StatCard } from "./ApplicationUI";
 
 interface HistoricalDashboardProps {
   onSimulateHistorical: (observations: FundingObservation[]) => void;
@@ -86,11 +80,10 @@ export const HistoricalDashboard: React.FC<HistoricalDashboardProps> = ({
       : null;
 
   return (
-    <div className="app-page">
+    <div className="app-page simple-page">
       <PageHeader
-        eyebrow="UNDERSTAND THE FUNDING ENVIRONMENT"
         title="Funding history"
-        description="Explore SOL-PERP funding patterns and test them against a fixed-rate hedge."
+        description="Choose an example dataset to use in the funding calculator."
         actions={
           <>
             <SegmentedControl
@@ -110,7 +103,7 @@ export const HistoricalDashboard: React.FC<HistoricalDashboardProps> = ({
               className="app-button app-button-primary"
               onClick={() => onSimulateHistorical(filteredObservations)}
             >
-              Use in simulator <ArrowRight size={14} />
+              Use in calculator <ArrowRight size={14} />
             </button>
           </>
         }
@@ -238,31 +231,10 @@ export const HistoricalDashboard: React.FC<HistoricalDashboardProps> = ({
           <span>All times UTC</span>
           <span>{dateLabel(filteredObservations.at(-1)!.endTime)}</span>
         </div>
-        <div className="history-footer-stats">
-          <div>
-            <span>Annualized average</span>
-            <strong className="app-number">
-              {stats.annualizedPct.toFixed(1)}%
-            </strong>
-          </div>
-          <div>
-            <span>Rate volatility</span>
-            <strong className="app-number">
-              ±{(stats.stdDevPpm / 10000).toFixed(4)}%
-            </strong>
-          </div>
-          <div>
-            <span>Funding frequency</span>
-            <strong>Every 8 hours</strong>
-          </div>
-        </div>
       </Panel>
-      <Notice>
-        <strong>A dataset for exploration.</strong> These deterministic
-        observations illustrate funding-rate behavior. Annualized figures
-        extrapolate the selected average and do not represent a forecast or
-        guaranteed return.
-      </Notice>
+      <p className="simple-example-note">
+        Example data for exploration, not a live feed or a forecast.
+      </p>
       <details className="app-disclosure">
         <summary>
           <span>
@@ -292,8 +264,12 @@ export const HistoricalDashboard: React.FC<HistoricalDashboardProps> = ({
               <dd>Decimal rate × 1,000,000 = PPM</dd>
             </div>
             <div>
-              <dt>Annualization</dt>
-              <dd>Average rate × 3 intervals × 365 days</dd>
+              <dt>Annualized average</dt>
+              <dd>{stats.annualizedPct.toFixed(1)}%</dd>
+            </div>
+            <div>
+              <dt>Rate volatility</dt>
+              <dd>±{(stats.stdDevPpm / 10000).toFixed(4)}%</dd>
             </div>
           </dl>
         </div>

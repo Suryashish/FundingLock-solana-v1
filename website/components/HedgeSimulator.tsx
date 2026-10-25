@@ -1,31 +1,24 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import { useMemo, useState } from "react";
+import { ArrowRight, ArrowUpRight, ChevronDown, RotateCcw } from "lucide-react";
 import {
   BINANCE_SOL_CONFIG,
-  ContractTerms,
-  FundingObservation,
-  PositionSide,
-} from "../lib/domain/types.ts";
+  type ContractTerms,
+  type FundingObservation,
+  type FundingOfferDraft,
+  type PositionSide,
+} from "../lib/domain/types";
 import {
   buildCashFlowComparison,
   formatCurrency,
   formatRatePercent,
-} from "../lib/domain/funding.ts";
+} from "../lib/domain/funding";
 import {
   DEMO_SCENARIOS,
   FIXTURE_START_TIME,
   INTERVAL_SECONDS,
-} from "../lib/data/fixtures.ts";
-import {
-  ArrowRight,
-  ArrowUpRight,
-  ChevronDown,
-  Clock3,
-  LockKeyhole,
-  RotateCcw,
-  ShieldCheck,
-} from "lucide-react";
+} from "../lib/data/fixtures";
 import {
   Notice,
   PageHeader,
@@ -33,365 +26,104 @@ import {
   SegmentedControl,
   StatCard,
 } from "./ApplicationUI";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { useWalletModal } from "@solana/wallet-adapter-react-ui";
-import { TransactionInstruction, LAMPORTS_PER_SOL } from "@solana/web3.js";
-import {
-  buildCreateOfferIx,
-  buildInitializeMarketIx,
-} from "../lib/solana/client.ts";
-import {
-  createContractId,
-  fetchContractAccount,
-  fetchMarketConfig,
-  formatSignature,
-  simulateAndSendTransaction,
-  type OnChainContractState,
-  type OnChainMarketConfig,
-} from "../lib/solana/transactions.ts";
-import { NavTab } from "./SideNavbar.tsx";
-import { WorkspaceResources } from "./WorkspaceResources";
 import { FundingCostChart } from "./FundingCostChart";
+import type { NavTab } from "./SideNavbar";
 
 interface HedgeSimulatorProps {
   customObservations?: FundingObservation[] | null;
+  historyRevision?: number;
   onNavigateTab?: (tab: NavTab) => void;
+  onPrepareOffer: (draft: FundingOfferDraft) => void;
 }
 
-export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
+export function HedgeSimulator({
   customObservations,
+  historyRevision = 0,
   onNavigateTab,
-}) => {
+  onPrepareOffer,
+}: HedgeSimulatorProps) {
   const [positionSide, setPositionSide] = useState<PositionSide>("long");
-  const [notionalDollars, setNotionalDollars] = useState<number>(10000);
-  const [fixedRatePercent, setFixedRatePercent] = useState<number>(0.02);
-  const [selectedScenarioId, setSelectedScenarioId] =
-    useState<string>("baseline");
-  const [useHistoricalData, setUseHistoricalData] = useState(true);
-
-  const { connection } = useConnection();
-  const wallet = useWallet();
-  const { setVisible } = useWalletModal();
-  const [walletBalance, setWalletBalance] = useState<number | null>(null);
-  const [marketConfig, setMarketConfig] = useState<OnChainMarketConfig | null>(
-    null,
+  const [amount, setAmount] = useState(10000);
+  const [rate, setRate] = useState(0.02);
+  const [scenario, setScenario] = useState("baseline");
+  const [ignoredHistoryRevision, setIgnoredHistoryRevision] = useState<
+    number | null
+  >(null);
+  const historyActive = Boolean(
+    customObservations?.length && ignoredHistoryRevision !== historyRevision,
   );
-  const [onChainContract, setOnChainContract] =
-    useState<OnChainContractState | null>(null);
-  const [chainAction, setChainAction] = useState<{
-    state: "idle" | "pending" | "success" | "error";
-    message: string;
-  }>({ state: "idle", message: "" });
-
-  // Real-time epoch countdown
-  const [countdown, setCountdown] = useState<string>("00h 00m 00s");
-
-  useEffect(() => {
-    function updateCountdown() {
-      const now = new Date();
-      const currentUtcHours = now.getUTCHours();
-      const currentUtcMinutes = now.getUTCMinutes();
-      const currentUtcSeconds = now.getUTCSeconds();
-
-      let nextEpochHour = 8;
-      if (currentUtcHours >= 16) {
-        nextEpochHour = 24;
-      } else if (currentUtcHours >= 8) {
-        nextEpochHour = 16;
-      }
-
-      const totalCurrentSeconds =
-        currentUtcHours * 3600 + currentUtcMinutes * 60 + currentUtcSeconds;
-      const targetSeconds = nextEpochHour * 3600;
-      const remaining = targetSeconds - totalCurrentSeconds;
-
-      const hrs = Math.floor(remaining / 3600);
-      const mins = Math.floor((remaining % 3600) / 60);
-      const secs = remaining % 60;
-
-      const pad = (n: number) => n.toString().padStart(2, "0");
-      setCountdown(`${pad(hrs)}h ${pad(mins)}m ${pad(secs)}s`);
-    }
-
-    updateCountdown();
-    const interval = setInterval(updateCountdown, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Fetch balance
-  useEffect(() => {
-    if (!wallet.publicKey || !wallet.connected) {
-      return;
-    }
-    let active = true;
-    connection
-      .getBalance(wallet.publicKey, "confirmed")
-      .then((bal) => {
-        if (active) setWalletBalance(Number(bal) / Number(LAMPORTS_PER_SOL));
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [wallet.connected, wallet.publicKey, connection]);
-
-  // Active observations
-  const activeObservations = useMemo(() => {
-    if (
-      useHistoricalData &&
-      customObservations &&
-      customObservations.length > 0
-    ) {
-      return customObservations.map((observation, index) => ({
-        ...observation,
-        intervalIndex: index,
-      }));
-    }
-    const scenario =
-      DEMO_SCENARIOS[selectedScenarioId] || DEMO_SCENARIOS.baseline;
-    return scenario.observations;
-  }, [customObservations, selectedScenarioId, useHistoricalData]);
-
-  // Construct active contract terms
-  const terms: ContractTerms = useMemo(() => {
-    const fixedRatePpm = Math.round(fixedRatePercent * 10000);
+  const observations = useMemo(
+    () =>
+      historyActive
+        ? customObservations!.map((item, index) => ({
+            ...item,
+            intervalIndex: index,
+          }))
+        : DEMO_SCENARIOS[scenario].observations,
+    [historyActive, customObservations, scenario],
+  );
+  const terms = useMemo<ContractTerms>(() => {
+    const intervalCount =
+      Math.max(20, ...observations.map((item) => item.intervalIndex)) + 1;
+    const startTime = observations[0]?.startTime ?? FIXTURE_START_TIME;
     return {
       contractId: "SIM-SOL-001",
       marketSymbol: "SOL-PERP",
       venueId: "BINANCE_PERP",
       positionSide,
-      notionalCents: Math.round(notionalDollars * 100),
-      fixedRatePpm,
-      intervalCount:
-        Math.max(
-          ...activeObservations.map((observation) => observation.intervalIndex),
-          20,
-        ) + 1,
+      notionalCents: Math.round(amount * 100),
+      fixedRatePpm: Math.round(rate * 10000),
+      intervalCount,
       intervalSeconds: INTERVAL_SECONDS,
-      startTime: activeObservations[0]?.startTime ?? FIXTURE_START_TIME,
-      endTime:
-        (activeObservations[0]?.startTime ?? FIXTURE_START_TIME) +
-        (Math.max(
-          ...activeObservations.map((observation) => observation.intervalIndex),
-          20,
-        ) +
-          1) *
-          INTERVAL_SECONDS,
+      startTime,
+      endTime: startTime + intervalCount * INTERVAL_SECONDS,
       minRatePpm: BINANCE_SOL_CONFIG.minRatePpm,
       maxRatePpm: BINANCE_SOL_CONFIG.maxRatePpm,
       collateralMint: "SOL",
     };
-  }, [positionSide, notionalDollars, fixedRatePercent, activeObservations]);
-
-  // Pure domain calculation
-  const explanation = useMemo(() => {
-    return buildCashFlowComparison(
-      terms,
-      activeObservations,
-      BINANCE_SOL_CONFIG,
-    );
-  }, [terms, activeObservations]);
-
-  useEffect(() => {
-    let active = true;
-    fetchMarketConfig(connection)
-      .then((config) => {
-        if (active) setMarketConfig(config);
-      })
-      .catch(() => {
-        if (active) setMarketConfig(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [connection]);
-
-  const handleCreateOfferOnChain = async () => {
-    if (!wallet.connected || !wallet.publicKey) {
-      setChainAction({
-        state: "error",
-        message: "Wallet not connected. Opening wallet selector...",
-      });
-      setVisible(true);
-      return;
-    }
-    if (positionSide !== "long") {
-      setChainAction({
-        state: "error",
-        message:
-          "The deployed Testnet contract currently supports long offers only.",
-      });
-      return;
-    }
-
-    setChainAction({
-      state: "pending",
-      message: "Verifying Testnet balance and preparing transaction…",
-    });
-    try {
-      const lamports = await connection.getBalance(
-        wallet.publicKey,
-        "confirmed",
-      );
-      if (lamports < 5_000_000) {
-        throw new Error(
-          `Insufficient Testnet SOL (balance: ${(lamports / 1e9).toFixed(4)} SOL). Need ~0.005 SOL for fees. Fund at https://faucet.solana.com.`,
-        );
-      }
-
-      const config = marketConfig ?? (await fetchMarketConfig(connection));
-      const instructions: TransactionInstruction[] = [];
-
-      if (!config) {
-        instructions.push(
-          buildInitializeMarketIx({
-            venueId: BINANCE_SOL_CONFIG.venueId,
-            marketSymbol: BINANCE_SOL_CONFIG.marketSymbol,
-            intervalSeconds: BINANCE_SOL_CONFIG.intervalSeconds,
-            minRatePpm: BINANCE_SOL_CONFIG.minRatePpm,
-            maxRatePpm: BINANCE_SOL_CONFIG.maxRatePpm,
-            maxNotionalCents: BINANCE_SOL_CONFIG.maxNotionalCents,
-            safetyBufferBps: BINANCE_SOL_CONFIG.safetyBufferBps,
-            oracleAuthority: wallet.publicKey,
-            admin: wallet.publicKey,
-          }),
-        );
-      } else if (config.isPaused) {
-        throw new Error("The on-chain SOL-PERP market is currently paused.");
-      }
-
-      const contractId = createContractId("SIM", wallet.publicKey);
-      instructions.push(
-        buildCreateOfferIx({
-          contractId,
-          marketSymbol: BINANCE_SOL_CONFIG.marketSymbol,
-          buyer: wallet.publicKey,
-          positionSide,
-          notionalCents: terms.notionalCents,
-          fixedRatePpm: terms.fixedRatePpm,
-          intervalCount: terms.intervalCount,
-          startTime: Math.floor(Date.now() / 1000),
-        }),
-      );
-
-      setChainAction({
-        state: "pending",
-        message:
-          "Awaiting wallet approval… Please approve the transaction in your wallet prompt.",
-      });
-
-      const signature = await simulateAndSendTransaction({
-        connection,
-        wallet,
-        description: config
-          ? "Create offer"
-          : "Initialize market & create offer",
-        instructions,
-      });
-
-      const updatedConfig = await fetchMarketConfig(connection);
-      if (updatedConfig) setMarketConfig(updatedConfig);
-
-      const account = await fetchContractAccount(connection, contractId);
-      setOnChainContract(account);
-      setChainAction({
-        state: "success",
-        message: `Offer ${contractId} created on Testnet! Tx: ${formatSignature(signature)}.`,
-      });
-    } catch (error) {
-      setChainAction({
-        state: "error",
-        message:
-          error instanceof Error ? error.message : "Offer creation failed.",
-      });
-    }
-  };
-
-  const resetToDocumentedBaseline = () => {
+  }, [observations, positionSide, amount, rate]);
+  const result = useMemo(
+    () => buildCashFlowComparison(terms, observations, BINANCE_SOL_CONFIG),
+    [terms, observations],
+  );
+  const days = terms.intervalCount / 3;
+  const incomplete = result.missingObservationsCount > 0;
+  const reset = () => {
     setPositionSide("long");
-    setNotionalDollars(10000);
-    setFixedRatePercent(0.02);
-    setSelectedScenarioId("baseline");
-    setUseHistoricalData(false);
-    setChainAction({ state: "idle", message: "" });
+    setAmount(10000);
+    setRate(0.02);
+    setScenario("baseline");
+    setIgnoredHistoryRevision(historyRevision);
   };
-
-  const durationDays = terms.intervalCount / 3;
-  const historicalActive = Boolean(
-    customObservations?.length && useHistoricalData,
-  );
-
-  const summaryCards = (
-    <div className="simulator-result-stats">
-      <StatCard
-        label="Without a hedge"
-        value={formatCurrency(explanation.totalActualFundingCostCents)}
-        detail={`Over ${durationDays.toFixed(durationDays % 1 ? 1 : 0)} days`}
-      />
-      <StatCard
-        label="Funding offset"
-        value={formatCurrency(explanation.totalSettlementCents, true)}
-        detail={
-          explanation.totalSettlementCents >= 0
-            ? "Received by hedger"
-            : "Paid by hedger"
-        }
-      />
-      <StatCard
-        label="Net funding cost"
-        value={formatCurrency(explanation.netFundingCostCents)}
-        detail="After the hedge"
-        accent
-      />
-    </div>
-  );
+  const changeScenario = (value: string) => {
+    setIgnoredHistoryRevision(value === "history" ? null : historyRevision);
+    if (value !== "history") setScenario(value);
+  };
 
   return (
-    <div className="app-page">
+    <div className="app-page simple-page">
       <PageHeader
-        eyebrow="PLAN YOUR POSITION"
-        title="Hedge simulator"
-        description="Explore your funding costs. Find a fixed rate that fits your position."
-        actions={
-          <button
-            type="button"
-            className="app-button app-button-secondary"
-            onClick={resetToDocumentedBaseline}
-          >
-            <RotateCcw size={14} />
-            Reset simulation
-          </button>
-        }
+        title="Plan your funding"
+        description="See what you could pay with a fixed-rate hedge before you create an offer."
       />
-      <div className="simulator-market-strip">
-        <span>
-          <span className="app-badge app-badge-accent">SOL-PERP</span>Binance
-          perpetuals
-        </span>
-        <span>
-          <Clock3 size={13} />
-          8-hour intervals
-        </span>
-        <span>
-          <ShieldCheck size={13} />
-          Example data
-        </span>
-        <span>
-          Next funding window{" "}
-          <strong className="app-number">{countdown}</strong>
-        </span>
-      </div>
-      <div className="simulator-mobile-summary">{summaryCards}</div>
-      <div className="simulator-layout">
-        <div className="app-stack simulator-config-column">
-          <Panel
-            title="Your hedge"
-            description="Adjust the terms to compare outcomes."
-            className="simulator-inputs"
-            action={<span className="app-badge">01</span>}
-          >
+      <div className="simple-calculator">
+        <Panel
+          title="1. Your position"
+          className="simple-calculator-inputs"
+          action={
+            <button
+              className="app-icon-button"
+              aria-label="Reset calculator"
+              title="Reset calculator"
+              onClick={reset}
+            >
+              <RotateCcw size={15} />
+            </button>
+          }
+        >
+          <div className="app-stack-small">
             <div className="app-field">
-              <span className="app-field-label">Position direction</span>
+              <span className="app-field-label">I hold a</span>
               <SegmentedControl
                 label="Position direction"
                 value={positionSide}
@@ -401,6 +133,11 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
                 ]}
                 onChange={setPositionSide}
               />
+              <small>
+                {positionSide === "long"
+                  ? "A position that benefits when the price rises."
+                  : "A position that benefits when the price falls."}
+              </small>
             </div>
             <div className="app-field">
               <label htmlFor="hedge-notional">Position size</label>
@@ -411,46 +148,20 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
                   type="number"
                   min={500}
                   max={50000}
-                  step={500}
-                  value={notionalDollars}
+                  step={100}
+                  value={amount}
                   onChange={(event) =>
-                    setNotionalDollars(
+                    setAmount(
                       Math.max(0, Math.min(50000, Number(event.target.value))),
                     )
                   }
-                  onBlur={() =>
-                    setNotionalDollars((value) => Math.max(500, value))
-                  }
+                  onBlur={() => setAmount((value) => Math.max(500, value))}
                 />
                 <span>USD</span>
               </div>
-              <input
-                className="app-range"
-                aria-label="Notional size in US dollars"
-                type="range"
-                min={500}
-                max={50000}
-                step={500}
-                value={notionalDollars}
-                onChange={(event) =>
-                  setNotionalDollars(Number(event.target.value))
-                }
-              />
-              <div className="app-presets">
-                {[1000, 5000, 10000, 25000].map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={notionalDollars === value}
-                    onClick={() => setNotionalDollars(value)}
-                  >
-                    ${value / 1000}k
-                  </button>
-                ))}
-              </div>
             </div>
             <div className="app-field">
-              <label htmlFor="hedge-rate">Fixed funding rate</label>
+              <label htmlFor="hedge-rate">The fixed rate I want</label>
               <div className="app-input-unit">
                 <input
                   id="hedge-rate"
@@ -458,228 +169,233 @@ export const HedgeSimulator: React.FC<HedgeSimulatorProps> = ({
                   type="number"
                   min={-0.5}
                   max={0.5}
-                  step={0.005}
-                  value={fixedRatePercent}
+                  step={0.0001}
+                  value={rate}
                   onChange={(event) =>
-                    setFixedRatePercent(
+                    setRate(
                       Math.max(-0.5, Math.min(0.5, Number(event.target.value))),
                     )
                   }
                 />
                 <span>% / 8h</span>
               </div>
-              <div className="app-presets">
-                {[0.01, 0.02, 0.05, -0.02].map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={fixedRatePercent === value}
-                    onClick={() => setFixedRatePercent(value)}
-                  >
-                    {value > 0 ? "+" : ""}
-                    {value.toFixed(2)}%
-                  </button>
-                ))}
-              </div>
+              <small>
+                Applied to your position for each 8-hour funding period.
+              </small>
             </div>
+            <div className="simple-duration">
+              <span>Market</span>
+              <strong>SOL-PERP</strong>
+              <span>Duration</span>
+              <strong>{days} days</strong>
+            </div>
+          </div>
+        </Panel>
+        <Panel
+          title="2. Compare your costs"
+          className="simple-calculator-result"
+        >
+          <div className="app-stack-small">
             <div className="app-field">
-              <label htmlFor="hedge-scenario">Market scenario</label>
+              <label htmlFor="hedge-scenario">What if funding…</label>
               <select
                 id="hedge-scenario"
                 className="app-select"
-                value={historicalActive ? "historical" : selectedScenarioId}
-                onChange={(event) => {
-                  setUseHistoricalData(event.target.value === "historical");
-                  if (event.target.value !== "historical")
-                    setSelectedScenarioId(event.target.value);
-                }}
+                value={historyActive ? "history" : scenario}
+                onChange={(event) => changeScenario(event.target.value)}
               >
                 {customObservations?.length && (
-                  <option value="historical">
-                    Loaded history · {customObservations.length / 3} days
+                  <option value="history">
+                    Follows the {customObservations.length / 3}-day dataset
                   </option>
                 )}
-                <option value="baseline">Baseline · +0.10% funding</option>
-                <option value="bullish">Rising funding</option>
-                <option value="bearish">Negative funding</option>
-                <option value="spike">Volatility spike</option>
-                <option value="missing">Missing observation</option>
+                <option value="baseline">Stays high at 0.10%</option>
+                <option value="bullish">Keeps rising</option>
+                <option value="bearish">Turns negative</option>
+                <option value="spike">Spikes suddenly</option>
+                {scenario === "missing" && (
+                  <option value="missing">Has missing data</option>
+                )}
               </select>
-              <small>
-                {historicalActive
-                  ? "Your selected history is loaded for this simulation."
-                  : "Illustrative scenarios. Results are not a forecast."}
-              </small>
             </div>
-            <dl className="app-detail-list">
-              <div>
-                <dt>Hedge duration</dt>
-                <dd>{durationDays.toFixed(durationDays % 1 ? 1 : 0)} days</dd>
-              </div>
-              <div>
-                <dt>Funding intervals</dt>
-                <dd>{terms.intervalCount}</dd>
-              </div>
-            </dl>
-          </Panel>
-          <Panel
-            title="Collateral estimate"
-            description="Based on the permitted rate bounds."
-          >
-            <dl className="app-detail-list">
-              <div>
-                <dt>Hedger collateral</dt>
-                <dd>
-                  {formatCurrency(explanation.requiredCollateralBuyerCents)}
-                </dd>
-              </div>
-              <div>
-                <dt>Counterparty collateral</dt>
-                <dd>
-                  {formatCurrency(explanation.requiredCollateralRiskTakerCents)}
-                </dd>
-              </div>
-              <div>
-                <dt>Safety buffer</dt>
-                <dd>5%</dd>
-              </div>
-            </dl>
-            <p className="app-small app-muted" style={{ marginTop: 14 }}>
-              Estimates shown in USD. The Testnet contract uses SOL collateral.
-            </p>
-          </Panel>
-        </div>
-        <div className="app-stack">
-          <div className="simulator-desktop-summary">{summaryCards}</div>
-          <Panel
-            title="A clearer view of your costs"
-            description="Cumulative funding across the selected scenario."
-            action={<span className="app-badge">USD</span>}
-          >
-            <FundingCostChart records={explanation.records} />
-            <div className="simulator-equation">
-              <p>Variable funding − settlement offset = net cost</p>
-              <strong className="app-number">
-                {formatCurrency(explanation.netFundingCostCents)}
-              </strong>
-            </div>
-          </Panel>
-          {explanation.missingObservationsCount > 0 ? (
-            <Notice tone="error">
-              {explanation.missingObservationsCount} observation missing.
-              Settlement remains incomplete until every required interval is
-              recorded.
-            </Notice>
-          ) : (
-            <Notice>
-              <strong>The hedge settles the difference.</strong> Your exchange
-              position stays in place. A positive offset is paid to the hedger;
-              a negative offset is paid to the counterparty.
-            </Notice>
-          )}
-          <Panel
-            title="Ready to set your terms?"
-            description="Create an offer using the parameters you’ve explored."
-          >
-            <div className="app-stack-small">
-              <button
-                className="app-button app-button-primary app-full-width"
-                onClick={handleCreateOfferOnChain}
-                disabled={
-                  chainAction.state === "pending" ||
-                  explanation.missingObservationsCount > 0 ||
-                  notionalDollars < 500
+            <div className="simple-comparison">
+              <StatCard
+                label="Without a hedge"
+                value={
+                  incomplete
+                    ? "Incomplete"
+                    : formatCurrency(result.totalActualFundingCostCents)
                 }
-              >
-                <LockKeyhole size={15} />
-                {chainAction.state === "pending"
-                  ? "Preparing your offer…"
-                  : wallet.connected
-                    ? "Create Testnet offer"
-                    : "Connect wallet to create an offer"}
-                <ArrowRight size={15} />
-              </button>
-              <p className="simulator-cta-note">
-                Solana Testnet ·{" "}
-                {wallet.connected && walletBalance !== null
-                  ? `${walletBalance.toFixed(4)} SOL available`
-                  : "Testnet SOL required for contract interactions"}
+                detail={
+                  result.totalActualFundingCostCents < 0
+                    ? `Received over ${days} days`
+                    : `Paid over ${days} days`
+                }
+              />
+              <StatCard
+                label="With a fixed-rate hedge"
+                value={
+                  incomplete
+                    ? "Incomplete"
+                    : formatCurrency(result.netFundingCostCents)
+                }
+                detail={
+                  result.netFundingCostCents < 0
+                    ? `Received over ${days} days`
+                    : `Paid over ${days} days`
+                }
+                accent
+              />
+            </div>
+            {incomplete ? (
+              <Notice tone="error">
+                A funding observation is missing. The estimate is incomplete
+                until every interval is recorded.
+              </Notice>
+            ) : (
+              <p className="simple-result-explanation">
+                {result.netFundingCostCents < 0 ? (
+                  <>
+                    Your net funding income would be{" "}
+                    <strong>
+                      {formatCurrency(-result.netFundingCostCents)}
+                    </strong>
+                  </>
+                ) : (
+                  <>
+                    Your net funding cost would be{" "}
+                    <strong>
+                      {formatCurrency(result.netFundingCostCents)}
+                    </strong>
+                  </>
+                )}{" "}
+                over {days} days at the fixed rate. Your exchange position stays
+                where it is.
               </p>
-              {chainAction.message && (
-                <Notice
-                  tone={
-                    chainAction.state === "error"
-                      ? "error"
-                      : chainAction.state === "success"
-                        ? "success"
-                        : "info"
-                  }
-                >
-                  {chainAction.message}
-                </Notice>
-              )}
-              {onChainContract && (
-                <p className="app-small app-muted">
-                  Contract {onChainContract.contractId} ·{" "}
-                  {onChainContract.lifecycleLabel}
-                </p>
-              )}
+            )}
+            <button
+              className="app-button app-button-primary app-full-width"
+              disabled={incomplete || amount < 500}
+              onClick={() =>
+                positionSide === "long"
+                  ? onPrepareOffer({
+                      positionSide,
+                      notionalCents: terms.notionalCents,
+                      fixedRatePpm: terms.fixedRatePpm,
+                      intervalCount: terms.intervalCount,
+                    })
+                  : onNavigateTab?.("marketplace")
+              }
+            >
+              {positionSide === "long"
+                ? "Create an offer with these terms"
+                : "Browse available offers"}
+              <ArrowRight size={15} />
+            </button>
+            <p className="simple-next-step">
+              {positionSide === "long"
+                ? "Review the terms first. Connect a wallet when you’re ready."
+                : "Short positions are available to simulate. Creating a Testnet offer currently requires a long position."}
+            </p>
+            {positionSide === "long" && (
               <button
-                className="app-button app-button-ghost"
+                className="simple-inline-link"
                 onClick={() => onNavigateTab?.("marketplace")}
               >
-                Or explore existing offers <ArrowUpRight size={14} />
+                Or browse available offers <ArrowUpRight size={13} />
               </button>
-            </div>
-          </Panel>
-        </div>
+            )}
+          </div>
+        </Panel>
       </div>
-      <details className="app-disclosure">
+      <p className="simple-example-note">
+        Illustrative example, not a forecast. This hedge covers funding
+        payments, not changes in the position’s price.
+      </p>
+      <details className="app-disclosure simple-calculation-details">
         <summary>
-          <span>
-            Interval settlement ledger{" "}
-            <span className="app-badge">{terms.intervalCount} intervals</span>
-          </span>
-          <ChevronDown size={17} />
+          <span>How this is calculated</span>
+          <ChevronDown size={16} />
         </summary>
-        <div className="app-table-scroll">
-          <table className="app-table">
-            <thead>
-              <tr>
-                <th>Interval</th>
-                <th>Observed rate</th>
-                <th>Exchange funding</th>
-                <th>Settlement offset</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {explanation.records.map((record) => (
-                <tr key={record.intervalIndex}>
-                  <td>#{record.intervalIndex + 1}</td>
-                  <td>
-                    {record.status === "missing"
-                      ? "—"
-                      : formatRatePercent(record.realizedRatePpm)}
-                  </td>
-                  <td>{formatCurrency(record.actualFundingCostCents)}</td>
-                  <td className="app-accent">
-                    {formatCurrency(record.intervalSettlementCents, true)}
-                  </td>
-                  <td>
-                    <span
-                      className={`app-badge${record.status === "recorded" ? " app-badge-accent" : ""}`}
-                    >
-                      {record.status === "recorded" ? "Recorded" : "Missing"}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="app-panel-body app-stack">
+          <dl className="app-detail-list">
+            <div>
+              <dt>Exchange funding</dt>
+              <dd>{formatCurrency(result.totalActualFundingCostCents)}</dd>
+            </div>
+            <div>
+              <dt>
+                FundingLock payment{" "}
+                {result.totalSettlementCents < 0
+                  ? "to the counterparty"
+                  : "to you"}
+              </dt>
+              <dd>{formatCurrency(Math.abs(result.totalSettlementCents))}</dd>
+            </div>
+            <div>
+              <dt>
+                Your net funding{" "}
+                {result.netFundingCostCents < 0 ? "income" : "cost"}
+              </dt>
+              <dd>{formatCurrency(Math.abs(result.netFundingCostCents))}</dd>
+            </div>
+            <div>
+              <dt>Estimated collateral you would deposit</dt>
+              <dd>{formatCurrency(result.requiredCollateralBuyerCents)}</dd>
+            </div>
+          </dl>
+          <FundingCostChart records={result.records} />
+          <details className="simple-nested-details">
+            <summary>
+              View all {terms.intervalCount} funding intervals{" "}
+              <ChevronDown size={14} />
+            </summary>
+            <div className="app-table-scroll">
+              <table className="app-table">
+                <thead>
+                  <tr>
+                    <th>Interval</th>
+                    <th>Funding rate</th>
+                    <th>FundingLock payment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.records.map((record) => (
+                    <tr key={record.intervalIndex}>
+                      <td>#{record.intervalIndex + 1}</td>
+                      <td>
+                        {record.status === "missing"
+                          ? "Missing"
+                          : formatRatePercent(record.realizedRatePpm)}
+                      </td>
+                      <td>
+                        {formatCurrency(record.intervalSettlementCents, true)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+          <div className="simple-detail-links">
+            <button
+              className="simple-inline-link"
+              onClick={() => onNavigateTab?.("historical")}
+            >
+              Explore funding history <ArrowUpRight size={13} />
+            </button>
+            <button
+              className="simple-inline-link"
+              onClick={() => {
+                setIgnoredHistoryRevision(historyRevision);
+                setScenario("missing");
+              }}
+            >
+              Try a missing-data example <ArrowUpRight size={13} />
+            </button>
+          </div>
         </div>
       </details>
-      <WorkspaceResources onNavigate={(tab) => onNavigateTab?.(tab)} />
     </div>
   );
-};
+}

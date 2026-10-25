@@ -20,7 +20,7 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses `next/font` to load Plus Jakarta Sans for consistent UI typography. JetBrains Mono is available for code through the shared Tailwind font tokens.
 
-The homepage (`/`) is the public landing page. The trading workspace has dedicated routes: `/simulator`, `/marketplace`, `/contract-flow`, `/rates`, and `/protocol`. The shared workspace layout preserves wallet, theme, and historical dataset state as users navigate between these pages.
+The homepage (`/`) is the public landing page. The trading workspace has dedicated routes: `/simulator`, `/marketplace`, `/contract-flow`, `/rates`, and `/protocol`. The primary navigation is Calculator, Offers, and How it works. Funding history is available from calculator details; the guided example is linked from the help page. The shared workspace preserves wallet, theme, and calculator history between pages. Calculator terms (including duration) carry into an offer review without sending a transaction.
 
 ## Learn More
 

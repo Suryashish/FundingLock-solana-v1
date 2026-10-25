@@ -46,7 +46,6 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
-  CircleCheck,
   Layers,
   LockKeyhole,
   Pause,
@@ -755,12 +754,12 @@ export const ReplayDemo: React.FC = () => {
 
   const busy = chainAction.state === "pending";
   const phaseNames = [
-    "Agree terms",
-    "Post collateral",
-    "Activate",
-    "Record funding",
-    "Maturity",
-    "Settlement",
+    "Choose terms",
+    "Add collateral",
+    "Start hedge",
+    "Track funding",
+    "Finish",
+    "Complete",
   ];
   const phaseDescriptions = [
     "Choose the size and rate for your agreement.",
@@ -789,28 +788,39 @@ export const ReplayDemo: React.FC = () => {
   ];
 
   return (
-    <div className="app-page">
+    <div className="app-page simple-page simple-flow">
       <PageHeader
-        eyebrow="FOLLOW THE AGREEMENT"
-        title="Contract flow"
-        description="Walk through a funding hedge, from the first agreement to the final settlement."
+        title="Try a guided example"
+        description={
+          executionMode === "simulation"
+            ? "Follow a sample hedge from start to finish. No wallet or funds needed."
+            : "Test a funding agreement on Solana Testnet. Contract actions require wallet approval."
+        }
         actions={
           <>
-            <SegmentedControl
-              label="Execution mode"
-              value={executionMode}
-              options={[
-                { value: "simulation", label: "Walkthrough" },
-                { value: "onchain", label: "Solana Testnet" },
-              ]}
-              onChange={(value) => {
-                if (busy) return;
-                setExecutionMode(value);
-                handleReset();
-                if (value === "onchain" && notionalDollars > 100)
-                  setNotionalDollars(50);
-              }}
-            />
+            <details className="simple-live-tools">
+              <summary>
+                Testnet tools <ChevronDown size={14} />
+              </summary>
+              <div>
+                {" "}
+                <SegmentedControl
+                  label="Execution mode"
+                  value={executionMode}
+                  options={[
+                    { value: "simulation", label: "Walkthrough" },
+                    { value: "onchain", label: "Solana Testnet" },
+                  ]}
+                  onChange={(value) => {
+                    if (busy) return;
+                    setExecutionMode(value);
+                    handleReset();
+                    if (value === "onchain" && notionalDollars > 100)
+                      setNotionalDollars(50);
+                  }}
+                />
+              </div>
+            </details>
             <button
               className="app-button app-button-secondary"
               onClick={handleReset}
@@ -948,7 +958,7 @@ export const ReplayDemo: React.FC = () => {
                     {busy
                       ? "Preparing contract…"
                       : executionMode === "simulation"
-                        ? "Start walkthrough"
+                        ? "Start example"
                         : "Create Testnet contract"}
                     <ArrowRight size={14} />
                   </button>
@@ -978,26 +988,31 @@ export const ReplayDemo: React.FC = () => {
                 </div>
                 {executionMode === "simulation" ? (
                   <>
-                    <div className="app-row-between">
-                      <span className="app-small app-secondary">
-                        Test an underfunded deposit
-                      </span>
-                      <button
-                        className="app-button app-button-secondary"
-                        aria-pressed={shortfallActive}
-                        onClick={() => setShortfallActive((value) => !value)}
-                      >
-                        {shortfallActive
-                          ? "Shortfall enabled · −$50"
-                          : "Enable shortfall"}
-                      </button>
-                    </div>
+                    <details className="simple-nested-details">
+                      <summary>
+                        Try an incomplete deposit <ChevronDown size={14} />
+                      </summary>{" "}
+                      <div className="app-row-between">
+                        <span className="app-small app-secondary">
+                          Test an underfunded deposit
+                        </span>
+                        <button
+                          className="app-button app-button-secondary"
+                          aria-pressed={shortfallActive}
+                          onClick={() => setShortfallActive((value) => !value)}
+                        >
+                          {shortfallActive
+                            ? "Shortfall enabled · −$50"
+                            : "Enable shortfall"}
+                        </button>
+                      </div>
+                    </details>
                     <div>
                       <button
                         className="app-button app-button-primary"
                         onClick={handleDepositBoth}
                       >
-                        Simulate both deposits <ArrowRight size={14} />
+                        Add example collateral <ArrowRight size={14} />
                       </button>
                     </div>
                   </>
@@ -1142,7 +1157,7 @@ export const ReplayDemo: React.FC = () => {
                       disabled={busy}
                     >
                       <LockKeyhole size={14} />
-                      Activate contract <ArrowRight size={14} />
+                      Start the hedge <ArrowRight size={14} />
                     </button>
                   )}
                 </div>
@@ -1217,7 +1232,7 @@ export const ReplayDemo: React.FC = () => {
                           )}{" "}
                           {isPlayingAuto
                             ? "Pause replay"
-                            : "Auto-publish intervals"}
+                            : "Run funding example"}
                         </button>
                       )}
                       <button
@@ -1227,26 +1242,34 @@ export const ReplayDemo: React.FC = () => {
                       >
                         {onChainContractId
                           ? "Publish next observation"
-                          : "Publish one interval"}
+                          : "Record next interval"}
                         <ArrowRight size={14} />
                       </button>
                     </div>
                     {!onChainContractId && (
-                      <div className="app-row-between">
-                        <span className="app-small app-muted">
-                          Edge case: omit observation #15
-                        </span>
-                        <button
-                          className="app-button app-button-ghost"
-                          disabled={publishedCount > 0}
-                          aria-pressed={missingObsActive}
-                          onClick={() => setMissingObsActive((value) => !value)}
-                        >
-                          {missingObsActive
-                            ? "Missing observation enabled"
-                            : "Enable edge case"}
-                        </button>
-                      </div>
+                      <details className="simple-nested-details">
+                        <summary>
+                          Try a missing funding interval{" "}
+                          <ChevronDown size={14} />
+                        </summary>
+                        <div className="app-row-between">
+                          <span className="app-small app-muted">
+                            Edge case: omit observation #15
+                          </span>
+                          <button
+                            className="app-button app-button-ghost"
+                            disabled={publishedCount > 0}
+                            aria-pressed={missingObsActive}
+                            onClick={() =>
+                              setMissingObsActive((value) => !value)
+                            }
+                          >
+                            {missingObsActive
+                              ? "Missing observation enabled"
+                              : "Enable edge case"}
+                          </button>
+                        </div>
+                      </details>
                     )}
                   </>
                 )}
@@ -1257,28 +1280,33 @@ export const ReplayDemo: React.FC = () => {
                   </Notice>
                 )}
                 {records.length > 0 && (
-                  <div className="flow-ledger">
-                    <table className="app-table">
-                      <thead>
-                        <tr>
-                          <th>Interval</th>
-                          <th>Observed rate</th>
-                          <th>Offset</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {records.map((record) => (
-                          <tr key={record.index}>
-                            <td>#{record.index + 1}</td>
-                            <td>{formatRatePercent(record.ratePpm)}</td>
-                            <td className="app-accent">
-                              {formatCurrency(record.settlement, true)}
-                            </td>
+                  <details className="simple-nested-details">
+                    <summary>
+                      Show recorded funding <ChevronDown size={14} />
+                    </summary>
+                    <div className="flow-ledger">
+                      <table className="app-table">
+                        <thead>
+                          <tr>
+                            <th>Interval</th>
+                            <th>Observed rate</th>
+                            <th>Offset</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                        </thead>
+                        <tbody>
+                          {records.map((record) => (
+                            <tr key={record.index}>
+                              <td>#{record.index + 1}</td>
+                              <td>{formatRatePercent(record.ratePpm)}</td>
+                              <td className="app-accent">
+                                {formatCurrency(record.settlement, true)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
                 )}
                 {step === 5 && !isFinalized && (
                   <div>
@@ -1334,94 +1362,38 @@ export const ReplayDemo: React.FC = () => {
               </>
             )}
           </Panel>
-          <details className="app-disclosure">
-            <summary>
-              <span>
-                <Layers size={15} />
-                Contract addresses
-              </span>
-              <ChevronDown size={16} />
-            </summary>
-            <div className="flow-addresses">
-              {[
-                { label: "Program", address: PROGRAM_ID.toBase58() },
-                { label: "Contract account", address: contractPda.toBase58() },
-                { label: "Collateral vault", address: vaultPda.toBase58() },
-              ].map((item) => (
-                <div key={item.label}>
-                  <span className="app-section-label">{item.label}</span>
-                  <a
-                    href={`https://explorer.solana.com/address/${item.address}?cluster=testnet`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <code>{item.address}</code>
-                  </a>
-                </div>
-              ))}
-            </div>
-          </details>
-        </div>
-        <div className="app-stack">
-          <Panel title="Agreement summary" className="flow-summary">
-            <dl className="app-detail-list">
-              <div>
-                <dt>Market</dt>
-                <dd>SOL-PERP</dd>
+          {executionMode === "onchain" && (
+            <details className="app-disclosure">
+              <summary>
+                <span>
+                  <Layers size={15} />
+                  Contract addresses
+                </span>
+                <ChevronDown size={16} />
+              </summary>
+              <div className="flow-addresses">
+                {[
+                  { label: "Program", address: PROGRAM_ID.toBase58() },
+                  {
+                    label: "Contract account",
+                    address: contractPda.toBase58(),
+                  },
+                  { label: "Collateral vault", address: vaultPda.toBase58() },
+                ].map((item) => (
+                  <div key={item.label}>
+                    <span className="app-section-label">{item.label}</span>
+                    <a
+                      href={`https://explorer.solana.com/address/${item.address}?cluster=testnet`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <code>{item.address}</code>
+                    </a>
+                  </div>
+                ))}
               </div>
-              <div>
-                <dt>Position</dt>
-                <dd>Long</dd>
-              </div>
-              <div>
-                <dt>Notional</dt>
-                <dd>{formatCurrency(terms.notionalCents)}</dd>
-              </div>
-              <div>
-                <dt>Fixed rate / 8h</dt>
-                <dd className="app-accent">
-                  {formatRatePercent(terms.fixedRatePpm)}
-                </dd>
-              </div>
-              <div>
-                <dt>Duration</dt>
-                <dd>7 days</dd>
-              </div>
-              <div>
-                <dt>Rate bounds</dt>
-                <dd>±0.50%</dd>
-              </div>
-            </dl>
-            <div className="flow-state">
-              <span className="app-badge app-badge-accent">
-                <CircleCheck size={12} />
-                {executionMode === "simulation"
-                  ? "Simulated walkthrough"
-                  : "Solana Testnet"}
-              </span>
-            </div>
-          </Panel>
-          <Notice>
-            {executionMode === "simulation" ? (
-              <>
-                <strong>Learn at your own pace.</strong> This walkthrough uses
-                example data and requires no wallet or funds.
-              </>
-            ) : (
-              <>
-                <strong>Testnet environment.</strong> Wallet approval is
-                required for contract interactions.{" "}
-                <a
-                  href="https://faucet.solana.com"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="app-accent"
-                >
-                  Get Testnet SOL ↗
-                </a>
-              </>
-            )}
-          </Notice>
+            </details>
+          )}
         </div>
       </div>
     </div>

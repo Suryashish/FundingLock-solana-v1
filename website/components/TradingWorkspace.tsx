@@ -16,8 +16,10 @@ import { HistoricalDashboard } from "./HistoricalDashboard";
 import { MarketplaceBoard } from "./MarketplaceBoard";
 import { ReplayDemo } from "./ReplayDemo";
 import { LandingOverview } from "./LandingOverview";
-import type { FundingObservation } from "../lib/domain/types";
-import { PROGRAM_ID } from "../lib/solana/client";
+import type {
+  FundingObservation,
+  FundingOfferDraft,
+} from "../lib/domain/types";
 
 const WalletContextProvider = dynamic(
   () =>
@@ -44,6 +46,9 @@ const tabRoutes: Record<NavTab, string> = {
 const WorkspaceContext = createContext<{
   observations: FundingObservation[] | null;
   datasetRevision: number;
+  offerDraft: FundingOfferDraft | null;
+  offerDraftRevision: number;
+  prepareOffer: (draft: FundingOfferDraft) => void;
   setObservations: (observations: FundingObservation[] | null) => void;
 } | null>(null);
 
@@ -55,6 +60,12 @@ export function TradingWorkspace({ children }: { children: ReactNode }) {
     FundingObservation[] | null
   >(null);
   const [datasetRevision, setDatasetRevision] = useState(0);
+  const [offerDraft, setOfferDraft] = useState<FundingOfferDraft | null>(null);
+  const [offerDraftRevision, setOfferDraftRevision] = useState(0);
+  const prepareOffer = (draft: FundingOfferDraft) => {
+    setOfferDraft(draft);
+    setOfferDraftRevision((revision) => revision + 1);
+  };
   const setObservations = (next: FundingObservation[] | null) => {
     setObservationState(next);
     setDatasetRevision((revision) => revision + 1);
@@ -72,13 +83,19 @@ export function TradingWorkspace({ children }: { children: ReactNode }) {
   return (
     <WalletContextProvider>
       <WorkspaceContext.Provider
-        value={{ observations, datasetRevision, setObservations }}
+        value={{
+          observations,
+          datasetRevision,
+          setObservations,
+          offerDraft,
+          offerDraftRevision,
+          prepareOffer,
+        }}
       >
         <div className="app-shell">
           <SideNavbar
             activeTab={activeTab}
             onSelectTab={(tab) => {
-              if (tab !== "simulator") setObservations(null);
               router.push(tabRoutes[tab]);
             }}
             isDark={isDark}
@@ -87,26 +104,10 @@ export function TradingWorkspace({ children }: { children: ReactNode }) {
           <div className="app-workspace-content">
             <main className="app-main">{children}</main>
             <footer className="app-footer">
-              <Link
-                href="/"
-                className="hover:text-emerald-500 transition-colors"
-              >
-                © 2026 FundingLock
-              </Link>
-              <div className="app-footer-links">
-                <span className="flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  Solana Testnet
-                </span>
-                <a
-                  href={`https://explorer.solana.com/address/${PROGRAM_ID.toBase58()}?cluster=testnet`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hover:text-emerald-500"
-                >
-                  View contract ↗
-                </a>
-              </div>
+              <Link href="/">FundingLock</Link>
+              <span>
+                Solana Testnet · Example calculations and test transactions
+              </span>
             </footer>
           </div>
         </div>
@@ -122,9 +123,13 @@ export function TradingView({ tab }: { tab: NavTab }) {
   if (tab === "simulator")
     return (
       <HedgeSimulator
-        key={workspace?.datasetRevision}
+        historyRevision={workspace?.datasetRevision}
         customObservations={workspace?.observations}
         onNavigateTab={navigate}
+        onPrepareOffer={(draft) => {
+          workspace?.prepareOffer(draft);
+          navigate("marketplace");
+        }}
       />
     );
   if (tab === "historical")
@@ -137,7 +142,13 @@ export function TradingView({ tab }: { tab: NavTab }) {
       />
     );
   if (tab === "marketplace")
-    return <MarketplaceBoard onAcceptOfferClick={() => navigate("replay")} />;
+    return (
+      <MarketplaceBoard
+        key={workspace?.offerDraftRevision}
+        initialDraft={workspace?.offerDraft}
+        onAcceptOfferClick={() => navigate("replay")}
+      />
+    );
   if (tab === "replay") return <ReplayDemo />;
   return <LandingOverview onNavigate={navigate} />;
 }
