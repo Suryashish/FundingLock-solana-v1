@@ -5,7 +5,8 @@ import {
   TransactionInstruction,
   VersionedTransaction,
 } from '@solana/web3.js';
-import type { SendOptions, TransactionSignature } from '@solana/web3.js';
+import type { SendTransactionOptions } from '@solana/wallet-adapter-base';
+import type { Signer, TransactionSignature } from '@solana/web3.js';
 import {
   PROGRAM_ID,
   SEEDS,
@@ -23,7 +24,7 @@ export interface WalletTransactionSigner {
   sendTransaction: (
     transaction: Transaction,
     connection: Connection,
-    options?: SendOptions
+    options?: SendTransactionOptions
   ) => Promise<TransactionSignature>;
   signTransaction?: (transaction: Transaction) => Promise<Transaction>;
 }
@@ -143,8 +144,9 @@ export async function simulateAndSendTransaction(params: {
   wallet: WalletTransactionSigner;
   instructions: TransactionInstruction[];
   description: string;
+  additionalSigners?: Signer[];
 }): Promise<TransactionSignature> {
-  const { connection, wallet, instructions, description } = params;
+  const { connection, wallet, instructions, description, additionalSigners = [] } = params;
   if (!wallet.publicKey) {
     throw new Error('Connect a wallet before signing this transaction.');
   }
@@ -157,6 +159,10 @@ export async function simulateAndSendTransaction(params: {
     feePayer: wallet.publicKey,
     recentBlockhash: latestBlockhash.blockhash,
   }).add(...instructions);
+
+  if (additionalSigners.length > 0) {
+    transaction.partialSign(...additionalSigners);
+  }
 
   // The wallet owns the required signer and cannot be asked to sign twice.
   // Convert the legacy transaction to a versioned simulation payload with a
@@ -194,9 +200,11 @@ export async function simulateAndSendTransaction(params: {
 
   try {
     if (wallet.signTransaction) {
-      // Preferred path: Sign via the wallet and broadcast directly through our configured
-      // connection. This avoids wallet extensions (e.g. Phantom) routing through their own
-      // internal RPC when on Testnet.
+      // Sign with additional signers again in case transaction blockhash or state refreshed
+      if (additionalSigners.length > 0) {
+        transaction.signatures = [];
+        transaction.partialSign(...additionalSigners);
+      }
       const signedTransaction = await wallet.signTransaction(transaction);
       const rawTransaction = signedTransaction.serialize();
       signature = await connection.sendRawTransaction(rawTransaction, {
@@ -206,6 +214,7 @@ export async function simulateAndSendTransaction(params: {
       });
     } else {
       signature = await wallet.sendTransaction(transaction, connection, {
+        signers: additionalSigners,
         preflightCommitment: 'confirmed',
         maxRetries: 3,
       });

@@ -14,9 +14,7 @@ import {
   formatCurrency,
   formatRatePercent,
 } from "../lib/domain/funding.ts";
-import {
-  calculateCollateralRequirement,
-} from "../lib/domain/collateral.ts";
+import { calculateCollateralRequirement } from "../lib/domain/collateral.ts";
 import {
   PROGRAM_ID,
   getContractPda,
@@ -29,7 +27,12 @@ import {
   buildInitializeMarketIx,
   buildRecordObservationIx,
 } from "../lib/solana/client.ts";
-import { TransactionInstruction } from "@solana/web3.js";
+import {
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  TransactionInstruction,
+} from "@solana/web3.js";
 import {
   createContractId,
   fetchContractAccount,
@@ -39,18 +42,20 @@ import {
   type OnChainContractState,
 } from "../lib/solana/transactions.ts";
 import {
+  ArrowRight,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  CircleCheck,
+  Layers,
+  LockKeyhole,
+  Pause,
   Play,
   RotateCcw,
-  CheckCircle2,
-  Lock,
-  ArrowRight,
   ShieldCheck,
-  AlertTriangle,
-  Pause,
   Wallet,
-  ChevronDown,
-  Layers,
 } from "lucide-react";
+import { Notice, PageHeader, Panel, SegmentedControl } from "./ApplicationUI";
 
 export const ReplayDemo: React.FC = () => {
   const { connection } = useConnection();
@@ -58,7 +63,9 @@ export const ReplayDemo: React.FC = () => {
   const { setVisible } = useWalletModal();
 
   // Execution mode: "simulation" (instant, zero wallet needed) or "onchain" (real Solana Testnet txs)
-  const [executionMode, setExecutionMode] = useState<"simulation" | "onchain">("simulation");
+  const [executionMode, setExecutionMode] = useState<"simulation" | "onchain">(
+    "simulation",
+  );
 
   // Lifecycle state (Steps 1 through 6)
   const [step, setStep] = useState<number>(1);
@@ -66,13 +73,33 @@ export const ReplayDemo: React.FC = () => {
   const [missingObsActive, setMissingObsActive] = useState<boolean>(false);
   const [shortfallActive, setShortfallActive] = useState<boolean>(false);
   const [notionalDollars, setNotionalDollars] = useState<number>(10000);
-  const [showAddressDetails, setShowAddressDetails] = useState<boolean>(false);
+  const [walletBalanceLamports, setWalletBalanceLamports] = useState<
+    number | null
+  >(null);
+
+  // Poll wallet balance on Testnet
+  useEffect(() => {
+    if (!wallet.publicKey) return;
+    let active = true;
+    connection
+      .getBalance(wallet.publicKey, "confirmed")
+      .then((bal) => {
+        if (active) setWalletBalanceLamports(bal);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [connection, wallet.publicKey, step]);
 
   // Contract terms
-  const terms = useMemo(() => ({
-    ...BASELINE_CONTRACT_TERMS,
-    notionalCents: notionalDollars * 100,
-  }), [notionalDollars]);
+  const terms = useMemo(
+    () => ({
+      ...BASELINE_CONTRACT_TERMS,
+      notionalCents: notionalDollars * 100,
+    }),
+    [notionalDollars],
+  );
 
   const req = calculateCollateralRequirement(terms, BINANCE_SOL_CONFIG);
 
@@ -82,10 +109,15 @@ export const ReplayDemo: React.FC = () => {
 
   // Observations submitted
   const [publishedCount, setPublishedCount] = useState<number>(0);
-  const [accumulatedSettlementCents, setAccumulatedSettlementCents] = useState<number>(0);
+  const [accumulatedSettlementCents, setAccumulatedSettlementCents] =
+    useState<number>(0);
   const [isFinalized, setIsFinalized] = useState<boolean>(false);
-  const [onChainContractId, setOnChainContractId] = useState<string | null>(null);
-  const [onChainState, setOnChainState] = useState<OnChainContractState | null>(null);
+  const [onChainContractId, setOnChainContractId] = useState<string | null>(
+    null,
+  );
+  const [onChainState, setOnChainState] = useState<OnChainContractState | null>(
+    null,
+  );
   const [chainAction, setChainAction] = useState<{
     state: "idle" | "pending" | "success" | "error";
     message: string;
@@ -105,12 +137,16 @@ export const ReplayDemo: React.FC = () => {
       if (missingObsActive && i === 14) {
         continue;
       }
-      const actualCost = calculateFundingCost(terms.notionalCents, terms.positionSide, obs.ratePpm);
+      const actualCost = calculateFundingCost(
+        terms.notionalCents,
+        terms.positionSide,
+        obs.ratePpm,
+      );
       const settlement = calculateIntervalSettlement(
         terms.notionalCents,
         terms.positionSide,
         terms.fixedRatePpm,
-        obs.ratePpm
+        obs.ratePpm,
       );
       cum += settlement;
       list.push({
@@ -134,11 +170,16 @@ export const ReplayDemo: React.FC = () => {
         if (!active || !account) return;
         setOnChainState(account);
         setPublishedCount(account.submittedObservationsCount);
-        setAccumulatedSettlementCents(Number(account.accumulatedSettlementCents));
+        setAccumulatedSettlementCents(
+          Number(account.accumulatedSettlementCents),
+        );
         if (account.lifecycleLabel === "Settled") {
           setIsFinalized(true);
           setStep(6);
-        } else if (account.lifecycleLabel === "Settling" && account.submittedObservationsCount >= account.intervalCount) {
+        } else if (
+          account.lifecycleLabel === "Settling" &&
+          account.submittedObservationsCount >= account.intervalCount
+        ) {
           setStep(5);
         }
       })
@@ -151,36 +192,55 @@ export const ReplayDemo: React.FC = () => {
   // Auto-Play in simulation mode
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    if (!onChainContractId && isPlayingAuto && step === 4 && publishedCount < 21) {
+    if (
+      !onChainContractId &&
+      isPlayingAuto &&
+      step === 4 &&
+      publishedCount < 21
+    ) {
       timer = setTimeout(() => {
-        setPublishedCount((prev) => {
-          const next = prev + 1;
-          const obs = BASELINE_DOCUMENTED_OBSERVATIONS[prev];
-          if (!(missingObsActive && prev === 14)) {
-            const settlement = calculateIntervalSettlement(
-              terms.notionalCents,
-              terms.positionSide,
-              terms.fixedRatePpm,
-              obs.ratePpm
-            );
-            setAccumulatedSettlementCents((c) => c + settlement);
-          }
-          if (next >= 21) {
-            setIsPlayingAuto(false);
-            setStep(5);
-          }
-          return next;
-        });
+        const observation = BASELINE_DOCUMENTED_OBSERVATIONS[publishedCount];
+        if (!(missingObsActive && publishedCount === 14)) {
+          const settlement = calculateIntervalSettlement(
+            terms.notionalCents,
+            terms.positionSide,
+            terms.fixedRatePpm,
+            observation.ratePpm,
+          );
+          setAccumulatedSettlementCents((current) => current + settlement);
+        }
+        const next = publishedCount + 1;
+        setPublishedCount(next);
+        if (next >= 21) {
+          setIsPlayingAuto(false);
+          setStep(5);
+        }
       }, 200);
     }
     return () => clearTimeout(timer);
-  }, [isPlayingAuto, step, publishedCount, missingObsActive, terms, onChainContractId]);
+  }, [
+    isPlayingAuto,
+    step,
+    publishedCount,
+    missingObsActive,
+    terms,
+    onChainContractId,
+  ]);
 
-  const runOnChainAction = async (action: () => Promise<string>, successPrefix: string) => {
-    setChainAction({ state: "pending", message: "Preparing and simulating transaction…" });
+  const runOnChainAction = async (
+    action: () => Promise<string>,
+    successPrefix: string,
+  ) => {
+    setChainAction({
+      state: "pending",
+      message: "Preparing and simulating transaction…",
+    });
     try {
       const signature = await action();
-      setChainAction({ state: "success", message: `${successPrefix} Tx: ${formatSignature(signature)}.` });
+      setChainAction({
+        state: "success",
+        message: `${successPrefix} Tx: ${formatSignature(signature)}.`,
+      });
       return signature;
     } catch (error) {
       setChainAction({
@@ -227,21 +287,37 @@ export const ReplayDemo: React.FC = () => {
   // Step 1: Create On-Chain Contract on Testnet
   const handleCreateOnChainContract = async () => {
     if (!wallet.publicKey) {
-      setChainAction({ state: "error", message: "Please connect your wallet first." });
+      setChainAction({
+        state: "error",
+        message: "Please connect your wallet first.",
+      });
       setVisible(true);
       return;
     }
     try {
-      const lamports = await connection.getBalance(wallet.publicKey, "confirmed");
+      const lamports = await connection.getBalance(
+        wallet.publicKey,
+        "confirmed",
+      );
+      const requiredBuyerLamports = req.buyerCollateralCents * 100_000;
       if (lamports < 5_000_000) {
         setChainAction({
           state: "error",
-          message: `Insufficient Testnet SOL (balance: ${(lamports / 1e9).toFixed(4)} SOL). Need ~0.005 SOL for transaction fees. Ensure wallet is set to Testnet and fund it at https://faucet.solana.com.`
+          message: `Insufficient Testnet SOL (balance: ${(lamports / 1e9).toFixed(4)} SOL). Need ~0.005 SOL for transaction fees. Ensure wallet is set to Testnet and fund it at https://faucet.solana.com.`,
+        });
+        return;
+      }
+      if (lamports < requiredBuyerLamports + 5_000_000) {
+        setChainAction({
+          state: "error",
+          message: `Insufficient Testnet SOL (balance: ${(lamports / 1e9).toFixed(4)} SOL). Hedging $${notionalDollars.toLocaleString()} notional requires ${(requiredBuyerLamports / 1e9).toFixed(4)} SOL collateral + gas. Select $50 notional (~0.057 SOL) or request SOL from https://faucet.solana.com.`,
         });
         return;
       }
 
-      const marketConfig = await fetchMarketConfig(connection).catch(() => null);
+      const marketConfig = await fetchMarketConfig(connection).catch(
+        () => null,
+      );
       const instructions: TransactionInstruction[] = [];
 
       if (!marketConfig) {
@@ -256,10 +332,13 @@ export const ReplayDemo: React.FC = () => {
             safetyBufferBps: BINANCE_SOL_CONFIG.safetyBufferBps,
             oracleAuthority: wallet.publicKey,
             admin: wallet.publicKey,
-          })
+          }),
         );
       } else if (marketConfig.isPaused) {
-        setChainAction({ state: "error", message: "The on-chain SOL-PERP market is currently paused." });
+        setChainAction({
+          state: "error",
+          message: "The on-chain SOL-PERP market is currently paused.",
+        });
         return;
       }
 
@@ -274,16 +353,19 @@ export const ReplayDemo: React.FC = () => {
           fixedRatePpm: terms.fixedRatePpm,
           intervalCount: terms.intervalCount,
           startTime: Math.floor(Date.now() / 1000),
-        })
+        }),
       );
 
       const signature = await runOnChainAction(
-        () => simulateAndSendTransaction({
-          connection,
-          wallet,
-          description: marketConfig ? "Create replay contract" : "Initialize market & create replay contract",
-          instructions,
-        }),
+        () =>
+          simulateAndSendTransaction({
+            connection,
+            wallet,
+            description: marketConfig
+              ? "Create replay contract"
+              : "Initialize market & create replay contract",
+            instructions,
+          }),
         `Replay contract ${contractId} created on Testnet!`,
       );
       if (!signature) return;
@@ -293,65 +375,200 @@ export const ReplayDemo: React.FC = () => {
     } catch (err) {
       setChainAction({
         state: "error",
-        message: err instanceof Error ? err.message : "Failed to create contract on chain.",
+        message:
+          err instanceof Error
+            ? err.message
+            : "Failed to create contract on chain.",
       });
     }
   };
 
   const handleAcceptOnChainContract = async () => {
     if (!wallet.publicKey || !onChainContractId) {
-      setChainAction({ state: "error", message: "Connect a risk-taker wallet to accept the contract." });
+      setChainAction({
+        state: "error",
+        message: "Connect a risk-taker wallet to accept the contract.",
+      });
+      return;
+    }
+    if (onChainState && onChainState.buyer.equals(wallet.publicKey)) {
+      setChainAction({
+        state: "error",
+        message:
+          "Unauthorized (Anchor Error 6000): The offer creator (Buyer) cannot accept their own offer as Risk Taker. Please switch to Account 2 in your wallet, or click 'Auto-Accept as Demo Counterparty'.",
+      });
       return;
     }
     const signature = await runOnChainAction(
-      () => simulateAndSendTransaction({
-        connection,
-        wallet,
-        description: "Accept replay contract",
-        instructions: [buildAcceptOfferIx({ contractPda, riskTaker: wallet.publicKey! })],
-      }),
+      () =>
+        simulateAndSendTransaction({
+          connection,
+          wallet,
+          description: "Accept replay contract",
+          instructions: [
+            buildAcceptOfferIx({ contractPda, riskTaker: wallet.publicKey! }),
+          ],
+        }),
       "Risk taker accepted the replay contract.",
     );
     if (signature) await refreshOnChainState();
+  };
+
+  // 1-Click testnet demo counterparty matcher
+  const handleAutoMatchWithDemoTaker = async () => {
+    if (!wallet.publicKey || !onChainContractId || !onChainState) return;
+    try {
+      const demoKeypair = Keypair.generate();
+      const neededRiskLamports = Number(
+        onChainState.requiredRiskTakerCollateral -
+          onChainState.depositedRiskTakerCollateral,
+      );
+      const neededBuyerLamports = Number(
+        onChainState.requiredBuyerCollateral -
+          onChainState.depositedBuyerCollateral,
+      );
+
+      const bal = await connection.getBalance(wallet.publicKey, "confirmed");
+      const requiredFromWallet = neededRiskLamports + 2_500_000 + 5_000_000;
+      if (bal < requiredFromWallet) {
+        setChainAction({
+          state: "error",
+          message: `Insufficient Testnet SOL (balance: ${(bal / 1e9).toFixed(4)} SOL). Need ${(requiredFromWallet / 1e9).toFixed(4)} SOL to fund demo counterparty. Request free SOL at https://faucet.solana.com or reset with $50 notional.`,
+        });
+        return;
+      }
+
+      const instructions: TransactionInstruction[] = [
+        SystemProgram.transfer({
+          fromPubkey: wallet.publicKey,
+          toPubkey: demoKeypair.publicKey,
+          lamports: neededRiskLamports + 2_500_000,
+        }),
+        buildAcceptOfferIx({
+          contractPda,
+          riskTaker: demoKeypair.publicKey,
+        }),
+        buildDepositCollateralIx({
+          contractPda,
+          vaultPda,
+          depositor: demoKeypair.publicKey,
+          amountLamports: neededRiskLamports,
+        }),
+      ];
+
+      // If buyer has not yet deposited, include buyer deposit in this exact same atomic transaction!
+      if (
+        neededBuyerLamports > 0 &&
+        bal >= requiredFromWallet + neededBuyerLamports
+      ) {
+        instructions.push(
+          buildDepositCollateralIx({
+            contractPda,
+            vaultPda,
+            depositor: wallet.publicKey,
+            amountLamports: neededBuyerLamports,
+          }),
+        );
+      }
+
+      const signature = await runOnChainAction(
+        () =>
+          simulateAndSendTransaction({
+            connection,
+            wallet,
+            description: "Auto-match & deposit demo counterparty",
+            instructions,
+            additionalSigners: [demoKeypair],
+          }),
+        "Demo counterparty accepted and collateral deposited into vault PDA!",
+      );
+
+      if (signature) {
+        const updated = await refreshOnChainState();
+        if (updated?.lifecycleLabel === "Funded") setStep(3);
+      }
+    } catch (err) {
+      setChainAction({
+        state: "error",
+        message:
+          err instanceof Error
+            ? err.message
+            : "Failed to auto-match demo counterparty.",
+      });
+    }
   };
 
   // Step 2: Deposit collateral
   const handleDepositBoth = async () => {
     if (onChainContractId) {
       if (!wallet.publicKey) {
-        setChainAction({ state: "error", message: "Connect your wallet to deposit collateral." });
+        setChainAction({
+          state: "error",
+          message: "Connect your wallet to deposit collateral.",
+        });
         return;
       }
       const account = await refreshOnChainState();
       if (!account) {
-        setChainAction({ state: "error", message: "Could not fetch contract account from Testnet." });
+        setChainAction({
+          state: "error",
+          message: "Could not fetch contract account from Testnet.",
+        });
         return;
       }
       const isBuyer = account.buyer.equals(wallet.publicKey);
-      const isRiskTaker = account.riskTaker.equals(wallet.publicKey);
+      const isRiskTaker =
+        !account.riskTaker.equals(PublicKey.default) &&
+        account.riskTaker.equals(wallet.publicKey);
       if (!isBuyer && !isRiskTaker) {
-        setChainAction({ state: "error", message: "This wallet is not a registered party to this contract." });
+        setChainAction({
+          state: "error",
+          message: "This wallet is not a registered party to this contract.",
+        });
         return;
       }
       const amount = isBuyer
         ? account.requiredBuyerCollateral - account.depositedBuyerCollateral
-        : account.requiredRiskTakerCollateral - account.depositedRiskTakerCollateral;
+        : account.requiredRiskTakerCollateral -
+          account.depositedRiskTakerCollateral;
       if (amount <= BigInt(0)) {
-        setChainAction({ state: "error", message: "Required collateral is already fully deposited." });
+        setChainAction({
+          state: "error",
+          message:
+            "Required collateral for this wallet is already fully deposited.",
+        });
         return;
       }
+
+      // Pre-flight balance check: avoid raw insufficient lamports custom error 0x1
+      const currentBal = await connection.getBalance(
+        wallet.publicKey,
+        "confirmed",
+      );
+      const requiredSolLamports = Number(amount) + 5_000_000;
+      if (currentBal < requiredSolLamports) {
+        setChainAction({
+          state: "error",
+          message: `Insufficient Testnet SOL (balance: ${(currentBal / 1e9).toFixed(4)} SOL). Depositing ${(Number(amount) / 1e9).toFixed(4)} SOL requires ${(requiredSolLamports / 1e9).toFixed(4)} SOL with fees. Top up at https://faucet.solana.com or reset with a $50 notional.`,
+        });
+        return;
+      }
+
       const signature = await runOnChainAction(
-        () => simulateAndSendTransaction({
-          connection,
-          wallet,
-          description: "Deposit replay collateral",
-          instructions: [buildDepositCollateralIx({
-            contractPda,
-            vaultPda,
-            depositor: wallet.publicKey!,
-            amountLamports: Number(amount),
-          })],
-        }),
+        () =>
+          simulateAndSendTransaction({
+            connection,
+            wallet,
+            description: "Deposit replay collateral",
+            instructions: [
+              buildDepositCollateralIx({
+                contractPda,
+                vaultPda,
+                depositor: wallet.publicKey!,
+                amountLamports: Number(amount),
+              }),
+            ],
+          }),
         `Deposited ${(Number(amount) / 1e9).toFixed(4)} SOL into vault PDA.`,
       );
       if (signature) {
@@ -362,7 +579,9 @@ export const ReplayDemo: React.FC = () => {
     }
 
     // Simulation path
-    const buyerDeposit = shortfallActive ? req.buyerCollateralCents - 5000 : req.buyerCollateralCents;
+    const buyerDeposit = shortfallActive
+      ? req.buyerCollateralCents - 5000
+      : req.buyerCollateralCents;
     setBuyerDeposited(buyerDeposit);
     setTakerDeposited(req.riskTakerCollateralCents);
     setStep(3);
@@ -372,25 +591,36 @@ export const ReplayDemo: React.FC = () => {
   const handleActivate = async () => {
     if (onChainContractId) {
       if (!wallet.publicKey) {
-        setChainAction({ state: "error", message: "Connect wallet to activate the funded contract." });
+        setChainAction({
+          state: "error",
+          message: "Connect wallet to activate the funded contract.",
+        });
         return;
       }
-      const marketConfig = await fetchMarketConfig(connection).catch(() => null);
+      const marketConfig = await fetchMarketConfig(connection).catch(
+        () => null,
+      );
       if (!marketConfig) {
-        setChainAction({ state: "error", message: "Market config could not be read from Testnet." });
+        setChainAction({
+          state: "error",
+          message: "Market config could not be read from Testnet.",
+        });
         return;
       }
       const signature = await runOnChainAction(
-        () => simulateAndSendTransaction({
-          connection,
-          wallet,
-          description: "Activate replay contract",
-          instructions: [buildActivateContractIx({
-            contractPda,
-            marketConfigPda: marketConfig.address,
-            authority: wallet.publicKey!,
-          })],
-        }),
+        () =>
+          simulateAndSendTransaction({
+            connection,
+            wallet,
+            description: "Activate replay contract",
+            instructions: [
+              buildActivateContractIx({
+                contractPda,
+                marketConfigPda: marketConfig.address,
+                authority: wallet.publicKey!,
+              }),
+            ],
+          }),
         "Replay contract activated on Testnet.",
       );
       if (signature) {
@@ -407,37 +637,53 @@ export const ReplayDemo: React.FC = () => {
   const handlePublishNext = async () => {
     if (onChainContractId) {
       if (!wallet.publicKey) {
-        setChainAction({ state: "error", message: "Connect oracle wallet to publish observations." });
+        setChainAction({
+          state: "error",
+          message: "Connect oracle wallet to publish observations.",
+        });
         return;
       }
       const account = await refreshOnChainState();
       if (!account) return;
-      const observation = BASELINE_DOCUMENTED_OBSERVATIONS[account.submittedObservationsCount];
+      const observation =
+        BASELINE_DOCUMENTED_OBSERVATIONS[account.submittedObservationsCount];
       if (!observation) {
-        setChainAction({ state: "error", message: "All 21 observations have already been recorded." });
+        setChainAction({
+          state: "error",
+          message: "All 21 observations have already been recorded.",
+        });
         return;
       }
-      const marketConfig = await fetchMarketConfig(connection).catch(() => null);
+      const marketConfig = await fetchMarketConfig(connection).catch(
+        () => null,
+      );
       if (!marketConfig) return;
       const signature = await runOnChainAction(
-        () => simulateAndSendTransaction({
-          connection,
-          wallet,
-          description: `Record funding observation #${observation.intervalIndex}`,
-          instructions: [buildRecordObservationIx({
-            contractPda,
-            marketConfigPda: marketConfig.address,
-            oracleAuthority: wallet.publicKey!,
-            intervalIndex: observation.intervalIndex,
-            realizedRatePpm: observation.ratePpm,
-            recordedAt: Math.floor(Date.now() / 1000),
-          })],
-        }),
+        () =>
+          simulateAndSendTransaction({
+            connection,
+            wallet,
+            description: `Record funding observation #${observation.intervalIndex}`,
+            instructions: [
+              buildRecordObservationIx({
+                contractPda,
+                marketConfigPda: marketConfig.address,
+                oracleAuthority: wallet.publicKey!,
+                intervalIndex: observation.intervalIndex,
+                realizedRatePpm: observation.ratePpm,
+                recordedAt: Math.floor(Date.now() / 1000),
+              }),
+            ],
+          }),
         `Observation #${observation.intervalIndex} recorded on Testnet.`,
       );
       if (signature) {
         const updated = await refreshOnChainState();
-        if (updated && updated.submittedObservationsCount >= updated.intervalCount) setStep(5);
+        if (
+          updated &&
+          updated.submittedObservationsCount >= updated.intervalCount
+        )
+          setStep(5);
       }
       return;
     }
@@ -453,7 +699,7 @@ export const ReplayDemo: React.FC = () => {
           terms.notionalCents,
           terms.positionSide,
           terms.fixedRatePpm,
-          obs.ratePpm
+          obs.ratePpm,
         );
         setAccumulatedSettlementCents((c) => c + settlement);
       }
@@ -468,24 +714,30 @@ export const ReplayDemo: React.FC = () => {
   const handleFinalize = async () => {
     if (onChainContractId) {
       if (!wallet.publicKey) {
-        setChainAction({ state: "error", message: "Connect wallet to finalize the contract." });
+        setChainAction({
+          state: "error",
+          message: "Connect wallet to finalize the contract.",
+        });
         return;
       }
       const account = await refreshOnChainState();
       if (!account) return;
       const signature = await runOnChainAction(
-        () => simulateAndSendTransaction({
-          connection,
-          wallet,
-          description: "Finalize replay contract",
-          instructions: [buildFinalizeContractIx({
-            contractPda,
-            vaultPda,
-            buyer: account.buyer,
-            riskTaker: account.riskTaker,
-            caller: wallet.publicKey!,
-          })],
-        }),
+        () =>
+          simulateAndSendTransaction({
+            connection,
+            wallet,
+            description: "Finalize replay contract",
+            instructions: [
+              buildFinalizeContractIx({
+                contractPda,
+                vaultPda,
+                buyer: account.buyer,
+                riskTaker: account.riskTaker,
+                caller: wallet.publicKey!,
+              }),
+            ],
+          }),
         "Contract settled & collateral distributed at maturity!",
       );
       if (signature) {
@@ -501,580 +753,676 @@ export const ReplayDemo: React.FC = () => {
     setStep(6);
   };
 
+  const busy = chainAction.state === "pending";
+  const phaseNames = [
+    "Agree terms",
+    "Post collateral",
+    "Activate",
+    "Record funding",
+    "Maturity",
+    "Settlement",
+  ];
+  const phaseDescriptions = [
+    "Choose the size and rate for your agreement.",
+    "Both sides fund the collateral required by the contract.",
+    "Confirm funding before the agreement becomes active.",
+    "Record observed funding and track the settlement balance.",
+    "All required intervals must be present before settlement.",
+    "The net difference is paid and excess collateral returned.",
+  ];
+  const actualTotal = records.reduce(
+    (total, record) => total + record.actualCost,
+    0,
+  );
+  const currentBuyer = Boolean(
+    onChainState &&
+    wallet.publicKey &&
+    onChainState.buyer.equals(wallet.publicKey),
+  );
+  const statuses = [
+    "Open",
+    "Matched",
+    "Funded",
+    "Active",
+    "Matured",
+    "Settled",
+  ];
+
   return (
-    <div className="space-y-6 max-w-5xl mx-auto pb-16 font-sans">
-      {/* 1. Header Toolbar with Mode Selector & Reset */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-black/[0.08] dark:border-white/[0.08]">
-        <div>
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-xs font-semibold mb-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-            <span>Interactive Protocol Lifecycle</span>
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-zinc-950 dark:text-white tracking-tight">
-            Contract Lifecycle Flow
-          </h1>
-          <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-            Test how a fixed-rate hedge agreement progresses through all 6 phases: matching, escrowing, oracle publication, and final settlement.
-          </p>
-        </div>
-
-        {/* Execution Mode Selector & Reset */}
-        <div className="flex items-center gap-2 self-start sm:self-center">
-          <div className="p-1 rounded-full bg-zinc-100 dark:bg-zinc-800/80 border border-black/[0.06] dark:border-white/[0.08] flex items-center gap-1 text-xs font-medium font-mono">
-            <button
-              onClick={() => {
-                setExecutionMode("simulation");
+    <div className="app-page">
+      <PageHeader
+        eyebrow="FOLLOW THE AGREEMENT"
+        title="Contract flow"
+        description="Walk through a funding hedge, from the first agreement to the final settlement."
+        actions={
+          <>
+            <SegmentedControl
+              label="Execution mode"
+              value={executionMode}
+              options={[
+                { value: "simulation", label: "Walkthrough" },
+                { value: "onchain", label: "Solana Testnet" },
+              ]}
+              onChange={(value) => {
+                if (busy) return;
+                setExecutionMode(value);
                 handleReset();
+                if (value === "onchain" && notionalDollars > 100)
+                  setNotionalDollars(50);
               }}
-              className={`px-3 py-1.5 rounded-full transition ${
-                executionMode === "simulation"
-                  ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 font-bold shadow-xs"
-                  : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"
-              }`}
-            >
-              Walkthrough
-            </button>
+            />
             <button
-              onClick={() => {
-                setExecutionMode("onchain");
-                handleReset();
-              }}
-              className={`px-3 py-1.5 rounded-full transition ${
-                executionMode === "onchain"
-                  ? "bg-[#74f89d] text-zinc-950 font-bold shadow-xs"
-                  : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"
-              }`}
+              className="app-button app-button-secondary"
+              onClick={handleReset}
+              disabled={busy}
             >
-              Solana Testnet
+              <RotateCcw size={14} />
+              Reset
             </button>
-          </div>
-
-          <button
-            onClick={handleReset}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-black/[0.08] dark:border-white/[0.08] hover:bg-black/[0.04] dark:hover:bg-white/[0.06] text-xs font-mono text-zinc-600 dark:text-zinc-400 transition"
-            title="Reset flow to Step 1"
+          </>
+        }
+      />
+      <ol className="flow-steps" aria-label="Contract progress">
+        {phaseNames.map((title, index) => (
+          <li
+            key={title}
+            className="flow-step"
+            data-state={
+              step === index + 1
+                ? "current"
+                : step > index + 1
+                  ? "complete"
+                  : "upcoming"
+            }
+            aria-current={step === index + 1 ? "step" : undefined}
           >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Reset</span>
-          </button>
-        </div>
-      </div>
-
-      {/* 2. Step Progress Bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-        {[
-          { num: 1, title: "1. Match Terms" },
-          { num: 2, title: "2. Escrow Margin" },
-          { num: 3, title: "3. Activate" },
-          { num: 4, title: "4. Record Epochs" },
-          { num: 5, title: "5. Maturity" },
-          { num: 6, title: "6. Net Payout" },
-        ].map((s) => {
-          const isCurrent = step === s.num;
-          const isPast = step > s.num;
-          return (
-            <div
-              key={s.num}
-              className={`p-3 rounded-2xl border text-xs font-mono transition-all ${
-                isCurrent
-                  ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 font-bold shadow-md border-transparent"
-                  : isPast
-                  ? "bg-[#74f89d]/15 border-[#74f89d]/40 text-emerald-800 dark:text-[#74f89d] font-semibold"
-                  : "bg-white dark:bg-[#121316] border-black/[0.1] dark:border-white/[0.1] text-zinc-400"
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span>{s.title}</span>
-                {isPast && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Action Notification Message */}
-      {chainAction.message && (
-        <div
-          className={`p-3.5 rounded-2xl border text-xs font-mono flex items-center justify-between ${
-            chainAction.state === "error"
-              ? "bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300"
-              : chainAction.state === "success"
-              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-400"
-              : "bg-zinc-100 dark:bg-zinc-800 border-black/[0.06] dark:border-white/[0.08] text-zinc-700 dark:text-zinc-300"
-          }`}
-        >
-          <span>{chainAction.message}</span>
-          <button
-            onClick={() => setChainAction({ state: "idle", message: "" })}
-            className="text-xs opacity-60 hover:opacity-100 font-bold ml-2"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {/* 3. Main Step Interactive Card */}
-      <div className="p-6 sm:p-7 rounded-[28px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/[0.08] shadow-sm space-y-6">
-        {/* STEP 1: Terms Agreement */}
-        {step === 1 && (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 font-bold block">
-                  Step 1 of 6
-                </span>
-                <h3 className="text-lg font-bold text-zinc-950 dark:text-white">
-                  Match Contract Terms
-                </h3>
-              </div>
-              <span className="text-xs font-mono px-2.5 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-semibold">
-                Status: OPEN
-              </span>
-            </div>
-
-            <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
-              Trader specifies perpetual position side, notional exposure, and agreed fixed funding rate. Counterparty agrees to take the opposing cash flow.
-            </p>
-
-            {/* Terms Summary Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
-              <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-black/[0.04] dark:border-white/[0.04] space-y-1">
-                <span className="text-zinc-400 text-[10px] uppercase">POSITION SIDE</span>
-                <div className="text-zinc-950 dark:text-white font-bold text-sm">LONG (+1)</div>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-black/[0.04] dark:border-white/[0.04] space-y-1">
-                <span className="text-zinc-400 text-[10px] uppercase">NOTIONAL SIZE</span>
-                <div className="text-zinc-950 dark:text-white font-bold text-sm">
-                  {formatCurrency(terms.notionalCents)}
-                </div>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-black/[0.04] dark:border-white/[0.04] space-y-1">
-                <span className="text-zinc-400 text-[10px] uppercase">TARGET FIXED RATE</span>
-                <div className="text-emerald-600 dark:text-emerald-400 font-bold text-sm">
-                  {formatRatePercent(terms.fixedRatePpm)} / 8h
-                </div>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-black/[0.04] dark:border-white/[0.04] space-y-1">
-                <span className="text-zinc-400 text-[10px] uppercase">DURATION</span>
-                <div className="text-zinc-950 dark:text-white font-bold text-sm">7 Days (21 Epochs)</div>
-              </div>
-            </div>
-
-            {/* Quick Notional Size Selector */}
-            <div className="flex flex-wrap items-center gap-2 text-xs font-mono pt-1">
-              <span className="text-zinc-500 text-[11px]">Adjust Notional:</span>
-              {[
-                { amt: 1000, label: "$1,000" },
-                { amt: 5000, label: "$5,000" },
-                { amt: 10000, label: "$10,000 (Baseline)" },
-                { amt: 25000, label: "$25,000" },
-              ].map(({ amt, label }) => (
-                <button
-                  key={amt}
-                  type="button"
-                  onClick={() => setNotionalDollars(amt)}
-                  className={`px-3 py-1 rounded-full text-[11px] font-semibold transition ${
-                    notionalDollars === amt
-                      ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 shadow-xs"
-                      : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {/* Primary Action Buttons */}
-            <div className="pt-2 flex flex-wrap items-center gap-3">
-              {executionMode === "simulation" ? (
-                <button
-                  onClick={handleStartSimulatedWalkthrough}
-                  className="flex items-center gap-2 px-6 py-3 rounded-full bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-xs font-semibold shadow-md hover:opacity-90 active:scale-98 transition"
-                >
-                  <span>Start 7-Day Replay Walkthrough</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
+            <span>
+              {step > index + 1 ? (
+                <Check size={12} />
               ) : (
-                <button
-                  onClick={handleCreateOnChainContract}
-                  disabled={chainAction.state === "pending"}
-                  className="flex items-center gap-2 px-6 py-3.5 rounded-full bg-[#74f89d] hover:bg-[#5df68b] text-zinc-950 text-xs font-bold shadow-md active:scale-98 transition disabled:opacity-50"
-                >
-                  <Wallet className="w-4 h-4" />
-                  <span>
-                    {chainAction.state === "pending"
-                      ? "Awaiting Wallet..."
-                      : "Create Contract PDA on Solana Testnet"}
-                  </span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
+                String(index + 1).padStart(2, "0")
               )}
-            </div>
-          </div>
-        )}
-
-        {/* STEP 2: Escrow Collateral */}
-        {step === 2 && (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 font-bold block">
-                  Step 2 of 6
-                </span>
-                <h3 className="text-lg font-bold text-zinc-950 dark:text-white">
-                  Escrow Required Collateral
-                </h3>
-              </div>
-              <span className="text-xs font-mono px-2.5 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-semibold">
-                Status: MATCHED / AWAITING DEPOSIT
-              </span>
-            </div>
-
-            <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
-              Both parties must deposit bound-calculated collateral plus a 5% solvency buffer into the program-derived vault PDA before activation is permitted.
-            </p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
-              <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-black/[0.04] dark:border-white/[0.04] space-y-1.5">
-                <span className="text-zinc-400 text-[10px] uppercase">BUYER REQUIRED DEPOSIT</span>
-                <div className="text-2xl font-bold text-zinc-950 dark:text-white">
-                  {formatCurrency(req.buyerCollateralCents)}
-                </div>
-                <div className="text-[11px] text-zinc-500">
-                  Max downside coverage + 5% buffer (~{(req.buyerCollateralCents / 10000).toFixed(2)} SOL)
-                </div>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-black/[0.04] dark:border-white/[0.04] space-y-1.5">
-                <span className="text-zinc-400 text-[10px] uppercase">RISK TAKER REQUIRED DEPOSIT</span>
-                <div className="text-2xl font-bold text-zinc-950 dark:text-white">
-                  {formatCurrency(req.riskTakerCollateralCents)}
-                </div>
-                <div className="text-[11px] text-zinc-500">
-                  Full buyer payout coverage + 5% buffer (~{(req.riskTakerCollateralCents / 10000).toFixed(2)} SOL)
-                </div>
-              </div>
-            </div>
-
-            {/* Edge Case Simulation Toggle (Walkthrough Mode) */}
-            {executionMode === "simulation" && (
-              <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/30 border border-black/[0.04] dark:border-white/[0.04] flex items-center justify-between text-xs font-mono">
-                <span className="text-zinc-600 dark:text-zinc-400">
-                  Simulate Underfunded Deposit Edge Case:
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShortfallActive(!shortfallActive)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-semibold transition ${
-                    shortfallActive
-                      ? "bg-amber-500 text-zinc-950 font-bold"
-                      : "bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-300 dark:hover:bg-zinc-700"
-                  }`}
-                >
-                  {shortfallActive ? "Shortfall Active (-$50 Short)" : "Standard 100% Funded"}
-                </button>
-              </div>
-            )}
-
-            {/* Action Buttons */}
-            <div className="pt-2 flex flex-wrap items-center gap-3">
-              {onChainContractId && onChainState?.lifecycleLabel === "Open" && (
-                <button
-                  onClick={handleAcceptOnChainContract}
-                  disabled={chainAction.state === "pending"}
-                  className="px-5 py-2.5 rounded-full bg-[#74f89d] hover:bg-[#5df68b] text-zinc-950 text-xs font-bold transition"
-                >
-                  Accept Offer as Risk Taker
-                </button>
-              )}
-              <button
-                onClick={handleDepositBoth}
-                disabled={chainAction.state === "pending"}
-                className="flex items-center gap-2 px-6 py-3 rounded-full bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-xs font-semibold shadow-md hover:opacity-90 active:scale-98 transition disabled:opacity-50"
-              >
-                <span>
-                  {onChainContractId
-                    ? "Deposit This Wallet's Collateral"
-                    : "Deposit Collateral into Vault PDA"}
-                </span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* STEP 3: Activation */}
-        {step === 3 && (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 font-bold block">
-                  Step 3 of 6
-                </span>
-                <h3 className="text-lg font-bold text-zinc-950 dark:text-white">
-                  Activate Contract on Solana
-                </h3>
-              </div>
+            </span>
+            <span>{title}</span>
+          </li>
+        ))}
+      </ol>
+      {chainAction.message && (
+        <Notice
+          tone={
+            chainAction.state === "error"
+              ? "error"
+              : chainAction.state === "success"
+                ? "success"
+                : "info"
+          }
+          onDismiss={() => setChainAction({ state: "idle", message: "" })}
+        >
+          {chainAction.message}
+        </Notice>
+      )}
+      <div className="flow-layout">
+        <div className="app-stack">
+          <Panel
+            className="flow-main"
+            title={`Step ${step} of 6`}
+            action={
               <span
-                className={`text-xs font-mono px-2.5 py-1 rounded-full font-semibold ${
-                  shortfallActive
-                    ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
-                    : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                }`}
+                className={`app-badge${step === 6 ? " app-badge-accent" : ""}`}
               >
-                {shortfallActive ? "State: UNDERFUNDED (BLOCKED)" : "State: FUNDED (READY)"}
+                {onChainState?.lifecycleLabel ?? statuses[step - 1]}
               </span>
-            </div>
-
-            {shortfallActive ? (
-              <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs space-y-2 text-amber-900 dark:text-amber-200">
-                <div className="flex items-center gap-2 font-bold">
-                  <AlertTriangle className="w-4 h-4 text-amber-500" />
-                  <span>Activation Guard Triggered: Collateral Shortfall Detected</span>
-                </div>
-                <p className="text-amber-800 dark:text-amber-300/80 leading-relaxed">
-                  Buyer deposit was short by $50.00. The Solana contract strictly prevents transition to ACTIVE unless 100% of the calculated bound requirements are locked in the PDA.
-                </p>
-                <button
-                  onClick={() => {
-                    setShortfallActive(false);
-                    setBuyerDeposited(req.buyerCollateralCents);
-                  }}
-                  className="px-3.5 py-1.5 rounded-full bg-amber-500 text-zinc-950 font-semibold hover:bg-amber-400 transition"
-                >
-                  Top Up Remaining $50.00
-                </button>
-              </div>
-            ) : (
-              <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-black/[0.04] dark:border-white/[0.04] text-xs font-mono space-y-2">
-                <div className="flex items-center gap-2 font-bold text-zinc-950 dark:text-white">
-                  <Lock className="w-4 h-4 text-emerald-500" />
-                  <span>Both Parties Fully Funded</span>
-                </div>
-                <div className="flex justify-between text-zinc-600 dark:text-zinc-400">
-                  <span>Vault PDA Escrow Balance:</span>
-                  <span className="font-bold text-zinc-950 dark:text-white text-sm">
-                    {formatCurrency(buyerDeposited + takerDeposited)}
-                  </span>
-                </div>
-                <p className="text-[11px] text-zinc-500 pt-1">
-                  Once activated, contract terms are immutable on-chain. Mid-cycle withdrawals are prohibited.
-                </p>
-              </div>
-            )}
-
-            {!shortfallActive && (
-              <button
-                onClick={handleActivate}
-                className="flex items-center gap-2 px-6 py-3 rounded-full bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-xs font-semibold shadow-md hover:opacity-90 active:scale-98 transition"
-              >
-                <span>Activate Contract on Solana</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* STEP 4, 5, 6: Oracles, Maturity, Settlement */}
-        {(step === 4 || step === 5 || step === 6) && (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 font-bold block">
-                  {step === 6 ? "Step 6 of 6" : step === 5 ? "Step 5 of 6" : "Step 4 of 6"}
-                </span>
-                <h3 className="text-lg font-bold text-zinc-950 dark:text-white">
-                  {step === 6
-                    ? "Settled at Maturity"
-                    : step === 5
-                    ? "Epochs Completed - Ready for Payout"
-                    : "Oracle Observations Recording"}
-                </h3>
-              </div>
-              <span className="text-xs font-mono px-2.5 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-semibold">
-                {publishedCount} / 21 Observations
-              </span>
-            </div>
-
-            {/* Step 4 Controls */}
-            {step === 4 && (
-              <div className="flex flex-wrap items-center gap-2.5 pt-1">
-                {!onChainContractId && (
-                  <button
-                    onClick={() => setIsPlayingAuto(!isPlayingAuto)}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-xs font-semibold shadow-xs hover:opacity-90 transition"
-                  >
-                    {isPlayingAuto ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                    <span>{isPlayingAuto ? "Pause Auto-Publish" : "Auto-Publish 8h Epochs"}</span>
-                  </button>
-                )}
-
-                <button
-                  onClick={handlePublishNext}
-                  disabled={isPlayingAuto || chainAction.state === "pending"}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-xs font-mono text-zinc-800 dark:text-zinc-200 font-semibold transition disabled:opacity-50"
-                >
-                  <span>{onChainContractId ? "Publish Next Observation" : "Step +1 Epoch"}</span>
-                </button>
-
-                {!onChainContractId && (
-                  <button
-                    onClick={() => setMissingObsActive(!missingObsActive)}
-                    className={`px-3.5 py-2 rounded-full text-xs font-mono font-semibold transition ${
-                      missingObsActive
-                        ? "bg-amber-500 text-zinc-950 font-bold"
-                        : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"
-                    }`}
-                  >
-                    {missingObsActive ? "Missing Obs #14 Active" : "Simulate Missing Obs #14"}
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* Missing observation warning */}
-            {missingObsActive && publishedCount >= 14 && (
-              <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2.5">
-                <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+            }
+          >
+            {step === 1 && (
+              <>
                 <div>
-                  <strong className="font-bold">Observation Missing for Interval #14</strong>
-                  <p className="text-amber-800 dark:text-amber-300/80 text-[11px] mt-0.5">
-                    Protocol halts settlement automatically. Missing observations are never defaulted to zero.
+                  <h3>Start with your terms.</h3>
+                  <p>
+                    {phaseDescriptions[0]} The walkthrough uses a long position
+                    and a fixed rate of 0.02% per interval.
                   </p>
                 </div>
-              </div>
+                <div className="flow-terms">
+                  <div>
+                    <span>Position</span>
+                    <strong>Long SOL-PERP</strong>
+                  </div>
+                  <div>
+                    <span>Notional size</span>
+                    <strong>{formatCurrency(terms.notionalCents)}</strong>
+                  </div>
+                  <div>
+                    <span>Fixed rate / 8h</span>
+                    <strong className="app-accent">
+                      {formatRatePercent(terms.fixedRatePpm)}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Contract duration</span>
+                    <strong>7 days · 21 intervals</strong>
+                  </div>
+                </div>
+                <div className="app-field">
+                  <span className="app-field-label">
+                    Choose a notional size
+                  </span>
+                  <div className="app-presets">
+                    {(executionMode === "onchain"
+                      ? [25, 50, 100, 250]
+                      : [1000, 5000, 10000, 25000]
+                    ).map((amount) => (
+                      <button
+                        key={amount}
+                        aria-pressed={notionalDollars === amount}
+                        onClick={() => setNotionalDollars(amount)}
+                      >
+                        ${amount.toLocaleString("en-US")}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {executionMode === "onchain" && (
+                  <Notice>
+                    Testnet mode creates a real contract using Testnet SOL.{" "}
+                    {walletBalanceLamports !== null
+                      ? `Connected balance: ${(walletBalanceLamports / 1e9).toFixed(4)} SOL.`
+                      : "Connect a wallet to get started."}
+                  </Notice>
+                )}
+                <div>
+                  <button
+                    className="app-button app-button-primary"
+                    onClick={
+                      executionMode === "simulation"
+                        ? handleStartSimulatedWalkthrough
+                        : handleCreateOnChainContract
+                    }
+                    disabled={busy}
+                  >
+                    {executionMode === "simulation" ? (
+                      <Play size={14} />
+                    ) : (
+                      <Wallet size={14} />
+                    )}{" "}
+                    {busy
+                      ? "Preparing contract…"
+                      : executionMode === "simulation"
+                        ? "Start walkthrough"
+                        : "Create Testnet contract"}
+                    <ArrowRight size={14} />
+                  </button>
+                </div>
+              </>
             )}
-
-            {/* Accounting Metrics Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
-              <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-black/[0.04] dark:border-white/[0.04] space-y-1">
-                <span className="text-zinc-400 text-[10px] uppercase">EPOCHS RECORDED</span>
-                <div className="text-base font-bold text-zinc-950 dark:text-white">{publishedCount} / 21</div>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-black/[0.04] dark:border-white/[0.04] space-y-1">
-                <span className="text-zinc-400 text-[10px] uppercase">REALIZED AVG RATE</span>
-                <div className="text-base font-bold text-zinc-950 dark:text-white">+0.1000%</div>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-black/[0.04] dark:border-white/[0.04] space-y-1">
-                <span className="text-zinc-400 text-[10px] uppercase">NET SETTLEMENT</span>
-                <div className="text-base font-bold text-emerald-600 dark:text-emerald-400">
-                  {formatCurrency(accumulatedSettlementCents, true)}
+            {step === 2 && (
+              <>
+                <div>
+                  <h3>Fund both sides of the hedge.</h3>
+                  <p>
+                    Collateral covers each side’s maximum exposure within the
+                    permitted rate bounds, with a 5% buffer.
+                  </p>
                 </div>
-              </div>
-              <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-black/[0.04] dark:border-white/[0.04] space-y-1">
-                <span className="text-zinc-400 text-[10px] uppercase">TOKEN TRANSFERS</span>
-                <div className="text-base font-bold text-zinc-700 dark:text-zinc-300">
-                  {isFinalized ? "Transferred (1)" : "0 (Accounting Only)"}
+                <div className="flow-terms">
+                  <div>
+                    <span>Hedger collateral estimate</span>
+                    <strong>{formatCurrency(req.buyerCollateralCents)}</strong>
+                  </div>
+                  <div>
+                    <span>Counterparty collateral estimate</span>
+                    <strong>
+                      {formatCurrency(req.riskTakerCollateralCents)}
+                    </strong>
+                  </div>
                 </div>
-              </div>
-            </div>
-
-            {/* Published intervals preview table */}
-            {records.length > 0 && (
-              <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-800/30 border border-black/[0.04] dark:border-white/[0.04] space-y-2 text-xs font-mono">
-                <div className="text-[10px] text-zinc-500 uppercase font-bold">
-                  Recorded Interval Ledger ({records.length}):
-                </div>
-                <div className="max-h-36 overflow-y-auto space-y-1 divide-y divide-black/[0.04] dark:divide-white/[0.04] pr-1">
-                  {records.map((r) => (
-                    <div key={r.index} className="flex justify-between items-center text-[11px] pt-1 text-zinc-700 dark:text-zinc-300">
-                      <span>Epoch #{r.index} (+0.1000%)</span>
-                      <span className="text-zinc-400">Interval: +$8.00</span>
-                      <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                        Cum: {formatCurrency(r.cum, true)}
+                {executionMode === "simulation" ? (
+                  <>
+                    <div className="app-row-between">
+                      <span className="app-small app-secondary">
+                        Test an underfunded deposit
                       </span>
+                      <button
+                        className="app-button app-button-secondary"
+                        aria-pressed={shortfallActive}
+                        onClick={() => setShortfallActive((value) => !value)}
+                      >
+                        {shortfallActive
+                          ? "Shortfall enabled · −$50"
+                          : "Enable shortfall"}
+                      </button>
                     </div>
-                  ))}
-                </div>
-              </div>
+                    <div>
+                      <button
+                        className="app-button app-button-primary"
+                        onClick={handleDepositBoth}
+                      >
+                        Simulate both deposits <ArrowRight size={14} />
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {onChainState && (
+                      <dl className="app-detail-list">
+                        <div>
+                          <dt>Connected role</dt>
+                          <dd>{currentBuyer ? "Hedger" : "Counterparty"}</dd>
+                        </div>
+                        <div>
+                          <dt>Hedger deposit</dt>
+                          <dd>
+                            {(
+                              Number(onChainState.depositedBuyerCollateral) /
+                              1e9
+                            ).toFixed(4)}{" "}
+                            /{" "}
+                            {(
+                              Number(onChainState.requiredBuyerCollateral) / 1e9
+                            ).toFixed(4)}{" "}
+                            SOL
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Counterparty deposit</dt>
+                          <dd>
+                            {(
+                              Number(
+                                onChainState.depositedRiskTakerCollateral,
+                              ) / 1e9
+                            ).toFixed(4)}{" "}
+                            /{" "}
+                            {(
+                              Number(onChainState.requiredRiskTakerCollateral) /
+                              1e9
+                            ).toFixed(4)}{" "}
+                            SOL
+                          </dd>
+                        </div>
+                      </dl>
+                    )}
+                    <div className="app-row">
+                      {onChainState?.lifecycleLabel === "Open" &&
+                      currentBuyer ? (
+                        <>
+                          <button
+                            className="app-button app-button-primary"
+                            onClick={handleDepositBoth}
+                            disabled={busy}
+                          >
+                            Deposit hedger collateral
+                          </button>
+                          <button
+                            className="app-button app-button-secondary"
+                            onClick={handleAutoMatchWithDemoTaker}
+                            disabled={busy}
+                          >
+                            Match & fund a demo counterparty
+                          </button>
+                        </>
+                      ) : onChainState?.lifecycleLabel === "Open" ? (
+                        <button
+                          className="app-button app-button-primary"
+                          onClick={handleAcceptOnChainContract}
+                          disabled={busy}
+                        >
+                          Accept as counterparty <ArrowRight size={14} />
+                        </button>
+                      ) : (
+                        <button
+                          className="app-button app-button-primary"
+                          onClick={handleDepositBoth}
+                          disabled={busy}
+                        >
+                          Deposit this wallet’s collateral{" "}
+                          <ArrowRight size={14} />
+                        </button>
+                      )}
+                    </div>
+                    {currentBuyer && (
+                      <p>
+                        The demo counterparty action funds a separate Testnet
+                        signer using this wallet. Review the transaction in your
+                        wallet before approving.
+                      </p>
+                    )}
+                  </>
+                )}
+              </>
             )}
-
-            {/* Step 5: Finalize Button */}
-            {step === 5 && !isFinalized && (
-              <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <span className="text-xs font-semibold text-emerald-950 dark:text-emerald-200">
-                    All 21 Funding Observations Successfully Verified
-                  </span>
-                  <span className="text-xs font-mono text-emerald-800 dark:text-emerald-300">
-                    Net Settlement Owed to Buyer: <strong>+$168.00</strong>
-                  </span>
+            {step === 3 && (
+              <>
+                <div>
+                  <h3>Ready for activation.</h3>
+                  <p>
+                    Once activated, the rate and duration are locked for the
+                    agreed term. Mid-cycle withdrawals are not available.
+                  </p>
                 </div>
-                <button
-                  onClick={handleFinalize}
-                  disabled={missingObsActive}
-                  className="flex items-center gap-2 px-6 py-3.5 rounded-full bg-[#74f89d] hover:bg-[#5df68b] text-zinc-950 text-xs font-bold shadow-md active:scale-98 transition disabled:opacity-50"
+                {shortfallActive ? (
+                  <Notice tone="error">
+                    <strong>Collateral is short by $50.</strong> Activation is
+                    blocked until the remaining deposit is funded.
+                  </Notice>
+                ) : (
+                  <Notice tone="success">
+                    <strong>Both sides are funded.</strong> The agreement can
+                    now be activated.
+                  </Notice>
+                )}
+                <dl className="app-detail-list">
+                  <div>
+                    <dt>Hedger deposit</dt>
+                    <dd>{formatCurrency(buyerDeposited)}</dd>
+                  </div>
+                  <div>
+                    <dt>Counterparty deposit</dt>
+                    <dd>{formatCurrency(takerDeposited)}</dd>
+                  </div>
+                  <div>
+                    <dt>Total collateral</dt>
+                    <dd>{formatCurrency(buyerDeposited + takerDeposited)}</dd>
+                  </div>
+                </dl>
+                <div>
+                  {shortfallActive ? (
+                    <button
+                      className="app-button app-button-primary"
+                      onClick={() => {
+                        setShortfallActive(false);
+                        setBuyerDeposited(req.buyerCollateralCents);
+                      }}
+                    >
+                      Top up the remaining $50 <ArrowRight size={14} />
+                    </button>
+                  ) : (
+                    <button
+                      className="app-button app-button-primary"
+                      onClick={handleActivate}
+                      disabled={busy}
+                    >
+                      <LockKeyhole size={14} />
+                      Activate contract <ArrowRight size={14} />
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+            {step >= 4 && (
+              <>
+                <div>
+                  {isFinalized && (
+                    <div
+                      className="flow-success-icon"
+                      style={{ marginBottom: 15 }}
+                    >
+                      <CheckCircle2 size={23} />
+                    </div>
+                  )}
+                  <h3>
+                    {step === 6
+                      ? "The agreement is settled."
+                      : step === 5
+                        ? "Your hedge has reached maturity."
+                        : "Track each funding interval."}
+                  </h3>
+                  <p>{phaseDescriptions[step - 1]}</p>
+                </div>
+                <div className="app-stack-small">
+                  <div className="app-row-between">
+                    <span className="app-small app-secondary">
+                      Observations recorded
+                    </span>
+                    <span className="app-small app-number">
+                      {records.length} / 21
+                    </span>
+                  </div>
+                  <div
+                    className="flow-progress"
+                    role="progressbar"
+                    aria-label="Funding observations recorded"
+                    aria-valuemin={0}
+                    aria-valuemax={21}
+                    aria-valuenow={records.length}
+                  >
+                    <span
+                      style={{ width: `${(records.length / 21) * 100}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="flow-terms">
+                  <div>
+                    <span>Exchange funding</span>
+                    <strong>{formatCurrency(actualTotal)}</strong>
+                  </div>
+                  <div>
+                    <span>Accumulated offset</span>
+                    <strong className="app-accent">
+                      {formatCurrency(accumulatedSettlementCents, true)}
+                    </strong>
+                  </div>
+                </div>
+                {step === 4 && (
+                  <>
+                    <div className="app-row">
+                      {!onChainContractId && (
+                        <button
+                          className="app-button app-button-primary"
+                          onClick={() => setIsPlayingAuto((value) => !value)}
+                        >
+                          {isPlayingAuto ? (
+                            <Pause size={14} />
+                          ) : (
+                            <Play size={14} />
+                          )}{" "}
+                          {isPlayingAuto
+                            ? "Pause replay"
+                            : "Auto-publish intervals"}
+                        </button>
+                      )}
+                      <button
+                        className="app-button app-button-secondary"
+                        onClick={handlePublishNext}
+                        disabled={isPlayingAuto || busy}
+                      >
+                        {onChainContractId
+                          ? "Publish next observation"
+                          : "Publish one interval"}
+                        <ArrowRight size={14} />
+                      </button>
+                    </div>
+                    {!onChainContractId && (
+                      <div className="app-row-between">
+                        <span className="app-small app-muted">
+                          Edge case: omit observation #15
+                        </span>
+                        <button
+                          className="app-button app-button-ghost"
+                          disabled={publishedCount > 0}
+                          aria-pressed={missingObsActive}
+                          onClick={() => setMissingObsActive((value) => !value)}
+                        >
+                          {missingObsActive
+                            ? "Missing observation enabled"
+                            : "Enable edge case"}
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+                {missingObsActive && publishedCount >= 15 && (
+                  <Notice tone="error">
+                    <strong>Observation #15 is missing.</strong> Settlement is
+                    blocked. Reset the walkthrough to run a complete dataset.
+                  </Notice>
+                )}
+                {records.length > 0 && (
+                  <div className="flow-ledger">
+                    <table className="app-table">
+                      <thead>
+                        <tr>
+                          <th>Interval</th>
+                          <th>Observed rate</th>
+                          <th>Offset</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {records.map((record) => (
+                          <tr key={record.index}>
+                            <td>#{record.index + 1}</td>
+                            <td>{formatRatePercent(record.ratePpm)}</td>
+                            <td className="app-accent">
+                              {formatCurrency(record.settlement, true)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {step === 5 && !isFinalized && (
+                  <div>
+                    <button
+                      className="app-button app-button-primary"
+                      onClick={handleFinalize}
+                      disabled={missingObsActive || busy}
+                    >
+                      <ShieldCheck size={15} />
+                      Settle the contract <ArrowRight size={14} />
+                    </button>
+                  </div>
+                )}
+                {isFinalized && (
+                  <>
+                    <dl className="app-detail-list">
+                      <div>
+                        <dt>Hedger collateral returned + settlement</dt>
+                        <dd>
+                          {formatCurrency(
+                            req.buyerCollateralCents +
+                              accumulatedSettlementCents,
+                          )}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Counterparty collateral − settlement</dt>
+                        <dd>
+                          {formatCurrency(
+                            req.riskTakerCollateralCents -
+                              accumulatedSettlementCents,
+                          )}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Net funding cost for the hedger</dt>
+                        <dd className="app-accent">
+                          {formatCurrency(
+                            actualTotal - accumulatedSettlementCents,
+                          )}
+                        </dd>
+                      </div>
+                    </dl>
+                    <Notice tone="success">
+                      {formatCurrency(actualTotal)} in exchange funding −{" "}
+                      {formatCurrency(accumulatedSettlementCents)} in settlement
+                      ={" "}
+                      {formatCurrency(actualTotal - accumulatedSettlementCents)}{" "}
+                      net funding cost.
+                    </Notice>
+                  </>
+                )}
+              </>
+            )}
+          </Panel>
+          <details className="app-disclosure">
+            <summary>
+              <span>
+                <Layers size={15} />
+                Contract addresses
+              </span>
+              <ChevronDown size={16} />
+            </summary>
+            <div className="flow-addresses">
+              {[
+                { label: "Program", address: PROGRAM_ID.toBase58() },
+                { label: "Contract account", address: contractPda.toBase58() },
+                { label: "Collateral vault", address: vaultPda.toBase58() },
+              ].map((item) => (
+                <div key={item.label}>
+                  <span className="app-section-label">{item.label}</span>
+                  <a
+                    href={`https://explorer.solana.com/address/${item.address}?cluster=testnet`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <code>{item.address}</code>
+                  </a>
+                </div>
+              ))}
+            </div>
+          </details>
+        </div>
+        <div className="app-stack">
+          <Panel title="Agreement summary" className="flow-summary">
+            <dl className="app-detail-list">
+              <div>
+                <dt>Market</dt>
+                <dd>SOL-PERP</dd>
+              </div>
+              <div>
+                <dt>Position</dt>
+                <dd>Long</dd>
+              </div>
+              <div>
+                <dt>Notional</dt>
+                <dd>{formatCurrency(terms.notionalCents)}</dd>
+              </div>
+              <div>
+                <dt>Fixed rate / 8h</dt>
+                <dd className="app-accent">
+                  {formatRatePercent(terms.fixedRatePpm)}
+                </dd>
+              </div>
+              <div>
+                <dt>Duration</dt>
+                <dd>7 days</dd>
+              </div>
+              <div>
+                <dt>Rate bounds</dt>
+                <dd>±0.50%</dd>
+              </div>
+            </dl>
+            <div className="flow-state">
+              <span className="app-badge app-badge-accent">
+                <CircleCheck size={12} />
+                {executionMode === "simulation"
+                  ? "Simulated walkthrough"
+                  : "Solana Testnet"}
+              </span>
+            </div>
+          </Panel>
+          <Notice>
+            {executionMode === "simulation" ? (
+              <>
+                <strong>Learn at your own pace.</strong> This walkthrough uses
+                example data and requires no wallet or funds.
+              </>
+            ) : (
+              <>
+                <strong>Testnet environment.</strong> Wallet approval is
+                required for contract interactions.{" "}
+                <a
+                  href="https://faucet.solana.com"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="app-accent"
                 >
-                  <ShieldCheck className="w-4 h-4" />
-                  <span>Execute Final Settlement Payout</span>
-                </button>
-              </div>
+                  Get Testnet SOL ↗
+                </a>
+              </>
             )}
-
-            {/* Step 6: Final Settled Report */}
-            {isFinalized && (
-              <div className="p-5 rounded-2xl bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 space-y-3 font-mono text-xs shadow-md">
-                <div className="flex items-center gap-2 font-bold text-sm">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 dark:text-emerald-600" />
-                  <span>Contract Settled at Maturity!</span>
-                </div>
-                <div className="space-y-1.5 text-[11px] opacity-90">
-                  <div>
-                    • <strong>Protection Buyer Payout:</strong> Initial Margin ($1,146.60) + $168.00 Net Settlement = <strong>$1,314.60</strong>
-                  </div>
-                  <div>
-                    • <strong>Risk Taker Return:</strong> Initial Margin ($1,058.40) - $168.00 Net Settlement = <strong>$890.40</strong>
-                  </div>
-                  <div>
-                    • <strong>Final Net Funding Cost:</strong> $210 (Binance) - $168 (Offset) = <strong>$42.00 Fixed</strong> (Target achieved!)
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* 4. Solana Program & Vault PDA Info Accordion */}
-      <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900/60 border border-black/[0.06] dark:border-white/[0.08] text-xs font-mono text-zinc-500 space-y-2">
-        <button
-          onClick={() => setShowAddressDetails(!showAddressDetails)}
-          className="w-full flex items-center justify-between text-left text-zinc-700 dark:text-zinc-300 font-semibold"
-        >
-          <div className="flex items-center gap-2">
-            <Layers className="w-3.5 h-3.5" />
-            <span>On-Chain PDA Addresses & Cryptographic Derivations</span>
-          </div>
-          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showAddressDetails ? "rotate-180" : ""}`} />
-        </button>
-
-        {showAddressDetails && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 text-[11px] animate-in fade-in duration-150">
-            <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/40">
-              <span className="text-zinc-400 block text-[10px] uppercase">PROGRAM ID</span>
-              <a
-                href={`https://explorer.solana.com/address/${PROGRAM_ID.toBase58()}?cluster=testnet`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-zinc-900 dark:text-zinc-100 truncate block hover:underline"
-              >
-                {PROGRAM_ID.toBase58()}
-              </a>
-            </div>
-            <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/40">
-              <span className="text-zinc-400 block text-[10px] uppercase">CONTRACT PDA</span>
-              <span className="text-zinc-900 dark:text-zinc-100 truncate block">
-                {contractPda.toBase58()}
-              </span>
-            </div>
-            <div className="p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/40">
-              <span className="text-zinc-400 block text-[10px] uppercase">VAULT PDA</span>
-              <span className="text-zinc-900 dark:text-zinc-100 truncate block">
-                {vaultPda.toBase58()}
-              </span>
-            </div>
-          </div>
-        )}
+          </Notice>
+        </div>
       </div>
     </div>
   );

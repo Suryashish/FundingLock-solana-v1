@@ -2,12 +2,36 @@
 
 import React, { useCallback, useEffect, useState, useMemo } from "react";
 import { FIXTURE_START_TIME } from "../lib/data/fixtures.ts";
-import { BINANCE_SOL_CONFIG, ContractTerms, PositionSide } from "../lib/domain/types.ts";
+import {
+  BINANCE_SOL_CONFIG,
+  ContractTerms,
+  PositionSide,
+} from "../lib/domain/types.ts";
 import { calculateCollateralRequirement } from "../lib/domain/collateral.ts";
 import { formatCurrency, formatRatePercent } from "../lib/domain/funding.ts";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey, TransactionInstruction } from "@solana/web3.js";
-import { Plus, Check, X } from "lucide-react";
+import {
+  ArrowRight,
+  ArrowUpRight,
+  Check,
+  Clock3,
+  LockKeyhole,
+  Plus,
+  RefreshCw,
+  ShieldCheck,
+  Store,
+  Users,
+  Wallet,
+} from "lucide-react";
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import {
+  AppDialog,
+  Notice,
+  PageHeader,
+  Panel,
+  SegmentedControl,
+} from "./ApplicationUI";
 import {
   buildAcceptOfferIx,
   buildCreateOfferIx,
@@ -86,19 +110,23 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
   onAcceptOfferClick,
 }) => {
   const wallet = useWallet();
+  const { setVisible } = useWalletModal();
   const { connection } = useConnection();
   const { publicKey } = wallet;
   const [offers, setOffers] = useState<ContractTerms[]>(DEFAULT_SAMPLE_OFFERS);
   const [isLoadingOffers, setIsLoadingOffers] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [filterSide, setFilterSide] = useState<"all" | "long" | "short">("all");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [acceptedOfferId, setAcceptedOfferId] = useState<string | null>(null);
 
   // Create offer state
   const [newSide, setNewSide] = useState<PositionSide>("long");
-  const [newNotional, setNewNotional] = useState<number>(1000);
+  const [newNotional, setNewNotional] = useState<number>(100);
   const [newFixedRate, setNewFixedRate] = useState<number>(0.02);
-  const [onChainContracts, setOnChainContracts] = useState<Record<string, OnChainContractState>>({});
+  const [onChainContracts, setOnChainContracts] = useState<
+    Record<string, OnChainContractState>
+  >({});
   const [actionStatus, setActionStatus] = useState<{
     state: "idle" | "pending" | "success" | "error";
     message: string;
@@ -106,8 +134,15 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
 
   const loadOnChainOffers = useCallback(async () => {
     setIsLoadingOffers(true);
+    setLoadFailed(false);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      const accounts = await fetchContractAccounts(connection);
+      const accounts = await Promise.race([
+        fetchContractAccounts(connection),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("RPC timeout")), 8000);
+        }),
+      ]);
       if (accounts && accounts.length > 0) {
         const onChainList: ContractTerms[] = accounts.map((account) => ({
           contractId: account.contractId,
@@ -124,15 +159,22 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
           maxRatePpm: BINANCE_SOL_CONFIG.maxRatePpm,
           collateralMint: "SOL",
           buyerPubkey: account.buyer.toBase58(),
-          riskTakerPubkey: account.riskTaker.equals(PublicKey.default) ? undefined : account.riskTaker.toBase58(),
+          riskTakerPubkey: account.riskTaker.equals(PublicKey.default)
+            ? undefined
+            : account.riskTaker.toBase58(),
           status: account.lifecycleLabel as ContractTerms["status"],
         }));
         setOffers(onChainList);
-        setOnChainContracts(Object.fromEntries(accounts.map((account) => [account.contractId, account])));
+        setOnChainContracts(
+          Object.fromEntries(
+            accounts.map((account) => [account.contractId, account]),
+          ),
+        );
       }
     } catch {
-      // Fallback to default benchmark offers if testnet RPC throttles
+      setLoadFailed(true);
     } finally {
+      clearTimeout(timeout);
       setIsLoadingOffers(false);
     }
   }, [connection]);
@@ -167,20 +209,37 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
   const handleCreateOffer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!publicKey) {
-      setActionStatus({ state: "error", message: "Please connect a wallet before posting an on-chain offer." });
+      setActionStatus({
+        state: "error",
+        message: "Please connect a wallet before posting an on-chain offer.",
+      });
       return;
     }
     if (newSide !== "long") {
-      setActionStatus({ state: "error", message: "The deployed Testnet contract currently supports long offers." });
+      setActionStatus({
+        state: "error",
+        message:
+          "The deployed Testnet contract currently supports long offers.",
+      });
       return;
     }
 
-    setActionStatus({ state: "pending", message: "Verifying Testnet balance and preparing transaction…" });
+    setActionStatus({
+      state: "pending",
+      message: "Verifying Testnet balance and preparing transaction…",
+    });
     try {
       const lamports = await connection.getBalance(publicKey, "confirmed");
+      const requiredBuyerLamports =
+        previewCollateral.buyerCollateralCents * 100_000;
       if (lamports < 5_000_000) {
         throw new Error(
-          `Insufficient Testnet SOL (balance: ${(lamports / 1e9).toFixed(4)} SOL). Need ~0.005 SOL for fees. Ensure wallet is set to Testnet and fund at https://faucet.solana.com.`
+          `Insufficient Testnet SOL (balance: ${(lamports / 1e9).toFixed(4)} SOL). Need ~0.005 SOL for fees. Ensure wallet is set to Testnet and fund at https://faucet.solana.com.`,
+        );
+      }
+      if (lamports < requiredBuyerLamports + 5_000_000) {
+        throw new Error(
+          `Insufficient Testnet SOL (balance: ${(lamports / 1e9).toFixed(4)} SOL). Funding this $${newNotional.toLocaleString()} notional offer requires ${(requiredBuyerLamports / 1e9).toFixed(4)} SOL collateral. Please reduce notional to $50 or fund at https://faucet.solana.com.`,
         );
       }
 
@@ -199,7 +258,7 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
             safetyBufferBps: BINANCE_SOL_CONFIG.safetyBufferBps,
             oracleAuthority: publicKey,
             admin: publicKey,
-          })
+          }),
         );
       } else if (marketConfig.isPaused) {
         throw new Error("The on-chain SOL-PERP market is currently paused.");
@@ -216,18 +275,21 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
           fixedRatePpm: Math.round(newFixedRate * 10000),
           intervalCount: 21,
           startTime: Math.floor(Date.now() / 1000),
-        })
+        }),
       );
 
       setActionStatus({
         state: "pending",
-        message: "Awaiting wallet approval… Please approve the transaction in your wallet prompt.",
+        message:
+          "Awaiting wallet approval… Please approve the transaction in your wallet prompt.",
       });
 
       const signature = await simulateAndSendTransaction({
         connection,
         wallet,
-        description: marketConfig ? "Create marketplace offer" : "Initialize market & create marketplace offer",
+        description: marketConfig
+          ? "Create marketplace offer"
+          : "Initialize market & create marketplace offer",
         instructions,
       });
 
@@ -256,22 +318,40 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
 
       setOffers((prev) => [newOffer, ...prev]);
       setShowCreateModal(false);
-      setActionStatus({ state: "success", message: `Offer ${contractId} created on Testnet! Tx: ${formatSignature(signature)}.` });
+      setActionStatus({
+        state: "success",
+        message: `Offer ${contractId} created on Testnet! Tx: ${formatSignature(signature)}.`,
+      });
     } catch (error) {
-      setActionStatus({ state: "error", message: error instanceof Error ? error.message : "Offer creation failed." });
+      setActionStatus({
+        state: "error",
+        message:
+          error instanceof Error ? error.message : "Offer creation failed.",
+      });
     }
   };
 
   const handleAccept = async (offer: ContractTerms) => {
-    const existing = onChainContracts[offer.contractId] ?? (await fetchContractAccount(connection, offer.contractId).catch(() => null));
-    
+    const existing = offer.contractId.startsWith("OFF-BENCH")
+      ? null
+      : (onChainContracts[offer.contractId] ??
+        (await fetchContractAccount(connection, offer.contractId).catch(
+          () => null,
+        )));
+
     // If it's a benchmark template without an active Testnet account, smoothly accept and route to Lifecycle Replay!
     if (!existing) {
       setAcceptedOfferId(offer.contractId);
-      setOffers((prev) => prev.map((item) => item.contractId === offer.contractId ? { ...item, status: "Matched" } : item));
+      setOffers((prev) =>
+        prev.map((item) =>
+          item.contractId === offer.contractId
+            ? { ...item, status: "Matched" }
+            : item,
+        ),
+      );
       setActionStatus({
         state: "success",
-        message: `Offer matched! Redirecting to the 6-step Contract Lifecycle Flow…`,
+        message: `Opening the example contract walkthrough…`,
       });
       if (onAcceptOfferClick) {
         setTimeout(() => onAcceptOfferClick(offer), 600);
@@ -280,35 +360,63 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
     }
 
     if (!publicKey) {
-      setActionStatus({ state: "error", message: "Please connect a wallet before accepting an on-chain offer." });
+      setActionStatus({
+        state: "error",
+        message: "Please connect a wallet before accepting an on-chain offer.",
+      });
       return;
     }
     if (existing.buyer.equals(publicKey)) {
-      setActionStatus({ state: "error", message: "The offer creator cannot accept their own offer as the risk taker." });
+      setActionStatus({
+        state: "error",
+        message:
+          "The offer creator cannot accept their own offer as the risk taker.",
+      });
       return;
     }
 
-    setActionStatus({ state: "pending", message: "Simulating offer acceptance on Testnet…" });
+    setActionStatus({
+      state: "pending",
+      message: "Simulating offer acceptance on Testnet…",
+    });
     try {
       const [contractPda] = getContractPda(offer.contractId);
       const signature = await simulateAndSendTransaction({
         connection,
         wallet,
         description: "Accept marketplace offer",
-        instructions: [buildAcceptOfferIx({ contractPda, riskTaker: publicKey })],
+        instructions: [
+          buildAcceptOfferIx({ contractPda, riskTaker: publicKey }),
+        ],
       });
       const account = await fetchContractAccount(connection, offer.contractId);
       if (account) {
-        setOnChainContracts((prev) => ({ ...prev, [offer.contractId]: account }));
+        setOnChainContracts((prev) => ({
+          ...prev,
+          [offer.contractId]: account,
+        }));
       }
       setAcceptedOfferId(offer.contractId);
-      setOffers((prev) => prev.map((item) => item.contractId === offer.contractId ? { ...item, status: "Matched" } : item));
-      setActionStatus({ state: "success", message: `Offer accepted on Testnet! Tx: ${formatSignature(signature)}.` });
+      setOffers((prev) =>
+        prev.map((item) =>
+          item.contractId === offer.contractId
+            ? { ...item, status: "Matched" }
+            : item,
+        ),
+      );
+      setActionStatus({
+        state: "success",
+        message: `Offer accepted on Testnet! Tx: ${formatSignature(signature)}.`,
+      });
       if (onAcceptOfferClick) {
         onAcceptOfferClick(offer);
       }
     } catch (error) {
-      setActionStatus({ state: "error", message: error instanceof Error ? error.message : "Offer acceptance failed." });
+      setActionStatus({
+        state: "error",
+        message:
+          error instanceof Error ? error.message : "Offer acceptance failed.",
+      });
     }
   };
 
@@ -317,283 +425,422 @@ export const MarketplaceBoard: React.FC<MarketplaceBoardProps> = ({
     return o.positionSide === filterSide;
   });
 
+  const liveOfferCount = offers.filter((offer) =>
+    Boolean(onChainContracts[offer.contractId]),
+  ).length;
+  const actionNotice = actionStatus.message && (
+    <Notice
+      tone={
+        actionStatus.state === "error"
+          ? "error"
+          : actionStatus.state === "success"
+            ? "success"
+            : "info"
+      }
+      onDismiss={() => setActionStatus({ state: "idle", message: "" })}
+    >
+      {actionStatus.message}
+    </Notice>
+  );
+  const offerAction = (offer: ContractTerms) => {
+    const example = offer.contractId.startsWith("OFF-BENCH");
+    const matched =
+      acceptedOfferId === offer.contractId || offer.status === "Matched";
+    if (!matched && offer.status && offer.status !== "Open") {
+      return <span className="app-badge">{offer.status}</span>;
+    }
+    return matched ? (
+      <span className="app-badge app-badge-accent">
+        <Check size={12} />
+        Matched
+      </span>
+    ) : (
+      <button
+        className={`app-button ${example ? "app-button-secondary" : "app-button-primary"}`}
+        disabled={actionStatus.state === "pending"}
+        onClick={() => handleAccept(offer)}
+      >
+        {example ? "Try example" : "Accept offer"}
+        {example ? <ArrowUpRight size={13} /> : <ArrowRight size={13} />}
+      </button>
+    );
+  };
+
   return (
-    <div className="space-y-6 max-w-5xl mx-auto pb-16 font-sans">
-      {/* 1. Header Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-black/[0.08] dark:border-white/[0.08]">
-        <div>
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-xs font-semibold mb-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-            <span>Solana Testnet Peer Offers · SOL-PERP</span>
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-zinc-950 dark:text-white tracking-tight">
-            Peer Hedge Marketplace
-          </h1>
-          <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-            Browse and match peer fixed funding offers. All agreements are program-enforced on Solana Testnet.
-          </p>
-        </div>
-
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#74f89d] hover:bg-[#5df68b] text-zinc-950 text-xs font-bold font-mono shadow-md active:scale-98 transition self-start sm:self-center"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Post New Offer</span>
-        </button>
-      </div>
-
-      {/* Action Notification Message */}
-      {actionStatus.message && (
-        <div
-          className={`p-3.5 rounded-2xl border text-xs font-mono flex items-center justify-between ${
-            actionStatus.state === "error"
-              ? "bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300"
-              : actionStatus.state === "success"
-              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-400"
-              : "bg-zinc-100 dark:bg-zinc-800 border-black/[0.06] dark:border-white/[0.08] text-zinc-700 dark:text-zinc-300"
-          }`}
-        >
-          <span>{actionStatus.message}</span>
+    <div className="app-page">
+      <PageHeader
+        eyebrow="FIND YOUR COUNTERPARTY"
+        title="Marketplace"
+        description="Explore fixed funding offers. Choose the terms that work for your position."
+        actions={
           <button
-            onClick={() => setActionStatus({ state: "idle", message: "" })}
-            className="text-xs opacity-60 hover:opacity-100 font-bold ml-2"
+            className="app-button app-button-primary"
+            onClick={() => {
+              setActionStatus({ state: "idle", message: "" });
+              setShowCreateModal(true);
+            }}
           >
-            ✕
+            <Plus size={16} />
+            Create an offer
+          </button>
+        }
+      />
+      {!showCreateModal && actionNotice}
+      <div className="market-toolbar">
+        <SegmentedControl
+          label="Filter offers"
+          value={filterSide}
+          onChange={setFilterSide}
+          options={[
+            { value: "all", label: "All offers" },
+            { value: "long", label: "Long hedges" },
+            { value: "short", label: "Short hedges" },
+          ]}
+        />
+        <div className="market-summary">
+          <span>
+            <strong className="app-secondary">{filteredOffers.length}</strong>{" "}
+            offers shown
+          </span>
+          <span className="app-badge">
+            {liveOfferCount > 0
+              ? `${liveOfferCount} Testnet contracts`
+              : "Example offers"}
+          </span>
+          <button
+            className="app-icon-button"
+            aria-label="Refresh offers"
+            title="Refresh offers"
+            onClick={() => void loadOnChainOffers()}
+            disabled={isLoadingOffers}
+          >
+            <RefreshCw
+              size={15}
+              className={isLoadingOffers ? "app-spinning" : ""}
+            />
           </button>
         </div>
-      )}
-
-      {/* 2. Filter Pills & Total Counter */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono">
-        <div className="p-1 rounded-full bg-zinc-100 dark:bg-zinc-800/80 border border-black/[0.06] dark:border-white/[0.08] inline-flex items-center gap-1">
-          {(["all", "long", "short"] as const).map((side) => (
-            <button
-              key={side}
-              onClick={() => setFilterSide(side)}
-              className={`px-3 py-1.5 rounded-full capitalize transition ${
-                filterSide === side
-                  ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 font-bold shadow-xs"
-                  : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white"
-              }`}
-            >
-              {side === "all" ? "All Offers" : `${side} Hedges`}
-            </button>
+      </div>
+      <section
+        className="app-panel"
+        aria-label="Funding offers"
+        aria-busy={isLoadingOffers}
+      >
+        <div className="app-panel-heading">
+          <div>
+            <h2>SOL-PERP funding offers</h2>
+            <p>Fixed rates per 8-hour interval · 7-day contracts</p>
+          </div>
+          <span className="app-badge">
+            <Clock3 size={11} />
+            21 intervals
+          </span>
+        </div>
+        {filteredOffers.length === 0 ? (
+          <div className="app-empty">
+            <Store size={27} />
+            <h3>No offers for this position</h3>
+            <p>Try another filter or create an offer with your terms.</p>
+          </div>
+        ) : (
+          <>
+            <div className="app-table-scroll market-table">
+              <table className="app-table">
+                <thead>
+                  <tr>
+                    <th>Market / offer</th>
+                    <th>Side</th>
+                    <th>Notional</th>
+                    <th>Fixed rate</th>
+                    <th>Collateral</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredOffers.map((offer) => {
+                    const req = calculateCollateralRequirement(
+                      offer,
+                      BINANCE_SOL_CONFIG,
+                    );
+                    const example = offer.contractId.startsWith("OFF-BENCH");
+                    return (
+                      <tr key={offer.contractId}>
+                        <td>
+                          <strong>SOL-PERP</strong>
+                          <small>
+                            {offer.contractId} ·{" "}
+                            {example ? "Example" : "Testnet"}
+                          </small>
+                        </td>
+                        <td>
+                          <span
+                            className={`app-badge ${offer.positionSide === "long" ? "app-badge-accent" : "app-badge-blue"}`}
+                          >
+                            {offer.positionSide === "long" ? "Long" : "Short"}
+                          </span>
+                        </td>
+                        <td>
+                          <strong>{formatCurrency(offer.notionalCents)}</strong>
+                          <small>USD notional</small>
+                        </td>
+                        <td className="app-accent">
+                          <strong>
+                            {formatRatePercent(offer.fixedRatePpm)}
+                          </strong>
+                          <small>per 8h</small>
+                        </td>
+                        <td>
+                          {formatCurrency(req.buyerCollateralCents)}
+                          <small>
+                            Hedger ·{" "}
+                            {formatCurrency(req.riskTakerCollateralCents)}{" "}
+                            counterparty
+                          </small>
+                        </td>
+                        <td>{offerAction(offer)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="market-cards">
+              {filteredOffers.map((offer) => {
+                const req = calculateCollateralRequirement(
+                  offer,
+                  BINANCE_SOL_CONFIG,
+                );
+                return (
+                  <article className="market-card" key={offer.contractId}>
+                    <div className="app-row-between">
+                      <div>
+                        <span className="market-card-id">SOL-PERP</span>
+                        <p className="app-muted app-small">
+                          {offer.contractId.startsWith("OFF-BENCH")
+                            ? "Example offer"
+                            : offer.contractId}
+                        </p>
+                      </div>
+                      <span
+                        className={`app-badge ${offer.positionSide === "long" ? "app-badge-accent" : "app-badge-blue"}`}
+                      >
+                        {offer.positionSide === "long"
+                          ? "Long hedge"
+                          : "Short hedge"}
+                      </span>
+                    </div>
+                    <dl className="app-detail-list">
+                      <div>
+                        <dt>Notional size</dt>
+                        <dd>{formatCurrency(offer.notionalCents)}</dd>
+                      </div>
+                      <div>
+                        <dt>Fixed rate / 8h</dt>
+                        <dd className="app-accent">
+                          {formatRatePercent(offer.fixedRatePpm)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Duration</dt>
+                        <dd>7 days · 21 intervals</dd>
+                      </div>
+                      <div>
+                        <dt>Hedger collateral</dt>
+                        <dd>{formatCurrency(req.buyerCollateralCents)}</dd>
+                      </div>
+                      <div>
+                        <dt>Counterparty collateral</dt>
+                        <dd>{formatCurrency(req.riskTakerCollateralCents)}</dd>
+                      </div>
+                    </dl>
+                    {offerAction(offer)}
+                  </article>
+                );
+              })}
+            </div>
+          </>
+        )}
+        <div className="app-table-caption">
+          <span>
+            {isLoadingOffers
+              ? "Refreshing Testnet offers…"
+              : loadFailed
+                ? "Testnet could not be refreshed. Example offers remain available."
+                : liveOfferCount
+                  ? "Contract data loaded from Solana Testnet."
+                  : "Example offers help you explore the contract walkthrough."}
+          </span>
+          <span>SOL-PERP</span>
+        </div>
+      </section>
+      <Notice>
+        <strong>Explore before you connect.</strong> Example offers open a
+        simulated walkthrough. Creating or accepting a Testnet contract requires
+        a connected wallet and Testnet SOL.
+      </Notice>
+      <Panel
+        title="From an offer to a fixed rate"
+        description="A clear agreement between two counterparties."
+      >
+        <div className="market-how-it-works">
+          {[
+            {
+              icon: Users,
+              title: "Agree on the terms",
+              text: "Match a position size, fixed rate, and contract duration.",
+            },
+            {
+              icon: LockKeyhole,
+              title: "Post collateral",
+              text: "Both counterparties fund the contract before activation.",
+            },
+            {
+              icon: ShieldCheck,
+              title: "Settle the difference",
+              text: "The contract compares observed funding with the agreed rate.",
+            },
+          ].map((item) => (
+            <div key={item.title}>
+              <span className="app-step-icon">
+                <item.icon size={15} />
+              </span>
+              <div>
+                <h3>{item.title}</h3>
+                <p>{item.text}</p>
+              </div>
+            </div>
           ))}
         </div>
-
-        <div className="flex items-center gap-4 text-zinc-500 dark:text-zinc-400 text-[11px]">
-          <span>Available Offers: <strong className="text-zinc-950 dark:text-white">{filteredOffers.length}</strong></span>
-          <span>•</span>
-          <span>Escrow: <strong className="text-emerald-600 dark:text-emerald-400">100% Locked</strong></span>
-        </div>
-      </div>
-
-      {/* 3. Offers Table */}
-      <div className="rounded-[28px] bg-white dark:bg-zinc-900/90 border border-black/[0.08] dark:border-white/[0.08] shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          {isLoadingOffers ? (
-            <div className="p-10 text-center text-xs font-mono text-zinc-500">
-              Querying Testnet Contract Account PDAs…
-            </div>
-          ) : (
-            <table className="w-full text-left text-xs font-mono">
-              <thead className="text-[10px] uppercase text-zinc-400 dark:text-zinc-500 bg-zinc-50/70 dark:bg-zinc-800/40 border-b border-black/[0.06] dark:border-white/[0.06]">
-                <tr>
-                  <th className="py-3 px-4">Offer ID</th>
-                  <th className="py-3 px-3">Position Side</th>
-                  <th className="py-3 px-3">Notional</th>
-                  <th className="py-3 px-3">Fixed Rate</th>
-                  <th className="py-3 px-3">Duration</th>
-                  <th className="py-3 px-3">Buyer Margin</th>
-                  <th className="py-3 px-3">Taker Margin</th>
-                  <th className="py-3 px-4 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-black/[0.04] dark:divide-white/[0.04]">
-                {filteredOffers.map((offer) => {
-                  const req = calculateCollateralRequirement(offer, BINANCE_SOL_CONFIG);
-                  const isAccepted = acceptedOfferId === offer.contractId || offer.status === "Matched";
-
-                  return (
-                    <tr
-                      key={offer.contractId}
-                      className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30 transition-colors"
-                    >
-                      <td className="py-3.5 px-4 font-bold text-zinc-950 dark:text-white">
-                        <div className="flex items-center gap-1.5">
-                          <span>{offer.contractId}</span>
-                          {offer.contractId.startsWith("OFF-BENCH") && (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500">
-                              Benchmark
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-3">
-                        <span
-                          className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
-                            offer.positionSide === "long"
-                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                              : "bg-blue-500/10 text-blue-600 dark:text-blue-400"
-                          }`}
-                        >
-                          {offer.positionSide.toUpperCase()}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-3 font-bold text-zinc-950 dark:text-white">
-                        {formatCurrency(offer.notionalCents)}
-                      </td>
-                      <td className="py-3.5 px-3 font-semibold text-emerald-600 dark:text-emerald-400">
-                        {formatRatePercent(offer.fixedRatePpm)} / 8h
-                      </td>
-                      <td className="py-3.5 px-3 text-zinc-500">
-                        7 Days (21 epochs)
-                      </td>
-                      <td className="py-3.5 px-3 text-zinc-700 dark:text-zinc-300">
-                        {formatCurrency(req.buyerCollateralCents)}
-                      </td>
-                      <td className="py-3.5 px-3 text-zinc-700 dark:text-zinc-300">
-                        {formatCurrency(req.riskTakerCollateralCents)}
-                      </td>
-                      <td className="py-3.5 px-4 text-right">
-                        {isAccepted ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold px-3 py-1 rounded-full bg-emerald-500/10">
-                            <Check className="w-3.5 h-3.5" />
-                            <span>Matched</span>
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => handleAccept(offer)}
-                            className="px-3.5 py-1.5 rounded-full bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-[11px] font-semibold hover:opacity-90 active:scale-98 transition shadow-2xs"
-                          >
-                            Accept Offer
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-
-      {/* 4. Create Offer Modal */}
+      </Panel>
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-zinc-900 border border-black/[0.08] dark:border-white/[0.1] rounded-[28px] max-w-lg w-full p-6 space-y-5 shadow-2xl text-zinc-950 dark:text-white animate-in zoom-in-95 duration-200 font-sans">
-            <div className="flex items-center justify-between border-b border-black/[0.06] dark:border-white/[0.08] pb-3">
-              <h3 className="text-base font-bold text-zinc-950 dark:text-white">
-                Post Fixed-Rate Funding Offer
-              </h3>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="text-zinc-400 hover:text-zinc-950 dark:hover:text-white transition"
-              >
-                <X className="w-4 h-4" />
-              </button>
+        <AppDialog
+          title="Create a funding offer"
+          description="Set your terms for a 7-day SOL-PERP hedge on Testnet."
+          onClose={() => {
+            if (actionStatus.state !== "pending") setShowCreateModal(false);
+          }}
+        >
+          <form onSubmit={handleCreateOffer} className="app-stack-small">
+            {actionNotice}
+            <div className="app-field">
+              <span className="app-field-label">Position direction</span>
+              <SegmentedControl
+                label="Offer position direction"
+                value={newSide}
+                onChange={setNewSide}
+                options={[
+                  { value: "long", label: "Long hedge" },
+                  { value: "short", label: "Short hedge" },
+                ]}
+              />
+              {newSide === "short" && (
+                <small>
+                  Short positions can be explored in the simulator. The current
+                  Testnet contract supports long offers.
+                </small>
+              )}
             </div>
-
-            <form onSubmit={handleCreateOffer} className="space-y-4 font-mono text-xs">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                  Perpetual Position Direction
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setNewSide("long")}
-                    className={`py-2 rounded-xl border font-semibold transition ${
-                      newSide === "long"
-                        ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 border-transparent"
-                        : "bg-zinc-50 dark:bg-zinc-800 text-zinc-500 border-black/[0.06] dark:border-white/[0.06]"
-                    }`}
-                  >
-                    LONG (s = +1)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setNewSide("short")}
-                    className={`py-2 rounded-xl border font-semibold transition ${
-                      newSide === "short"
-                        ? "bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 border-transparent"
-                        : "bg-zinc-50 dark:bg-zinc-800 text-zinc-500 border-black/[0.06] dark:border-white/[0.06]"
-                    }`}
-                  >
-                    SHORT (s = -1)
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                  Hedged Notional ($ USD)
-                </label>
+            <div className="app-field">
+              <label htmlFor="offer-notional">Notional size</label>
+              <div className="app-input-unit">
                 <input
+                  id="offer-notional"
+                  className="app-input"
                   type="number"
-                  min="100"
-                  max="50000"
-                  step="100"
+                  min={25}
+                  max={50000}
+                  step={25}
                   value={newNotional}
-                  onChange={(e) => setNewNotional(Number(e.target.value))}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800 border border-black/[0.08] dark:border-white/[0.08] text-xs font-mono font-bold text-zinc-950 dark:text-white"
+                  onChange={(event) =>
+                    setNewNotional(Number(event.target.value))
+                  }
+                  required
                 />
+                <span>USD</span>
               </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                  Agreed Fixed Rate (% per 8h)
-                </label>
+            </div>
+            <div className="app-field">
+              <label htmlFor="offer-fixed-rate">Fixed funding rate</label>
+              <div className="app-input-unit">
                 <input
+                  id="offer-fixed-rate"
+                  className="app-input"
                   type="number"
-                  step="0.005"
-                  min="-0.50"
-                  max="0.50"
+                  min={-0.5}
+                  max={0.5}
+                  step={0.005}
                   value={newFixedRate}
-                  onChange={(e) => setNewFixedRate(Number(e.target.value))}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800 border border-black/[0.08] dark:border-white/[0.08] text-xs font-mono font-bold text-zinc-950 dark:text-white"
+                  onChange={(event) =>
+                    setNewFixedRate(Number(event.target.value))
+                  }
+                  required
                 />
+                <span>% / 8h</span>
               </div>
-
-              {/* Collateral preview box */}
-              <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-black/[0.06] dark:border-white/[0.06] space-y-1.5">
-                <div className="text-zinc-400 uppercase text-[10px] font-bold">
-                  Solana Escrow Collateral Breakdown:
-                </div>
-                <div className="flex justify-between text-zinc-700 dark:text-zinc-300">
-                  <span>Your Escrow (Buyer):</span>
-                  <strong className="text-zinc-950 dark:text-white">
-                    {formatCurrency(previewCollateral.buyerCollateralCents)}
-                  </strong>
-                </div>
-                <div className="flex justify-between text-zinc-700 dark:text-zinc-300">
-                  <span>Counterparty Escrow (Taker):</span>
-                  <strong className="text-zinc-950 dark:text-white">
-                    {formatCurrency(previewCollateral.riskTakerCollateralCents)}
-                  </strong>
-                </div>
+            </div>
+            <div className="app-notice">
+              <ShieldCheck size={17} />
+              <div>
+                <strong>Estimated collateral</strong>
+                <dl className="app-detail-list" style={{ marginTop: 12 }}>
+                  <div>
+                    <dt>Hedger</dt>
+                    <dd>
+                      {formatCurrency(previewCollateral.buyerCollateralCents)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Counterparty</dt>
+                    <dd>
+                      {formatCurrency(
+                        previewCollateral.riskTakerCollateralCents,
+                      )}
+                    </dd>
+                  </div>
+                </dl>
+                <span className="app-muted">
+                  USD estimates. Deposits are made in Testnet SOL.
+                </span>
               </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2 rounded-full text-xs font-semibold text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition"
-                >
-                  Cancel
-                </button>
+            </div>
+            <div className="app-dialog-footer">
+              <button
+                type="button"
+                className="app-button app-button-secondary"
+                onClick={() => setShowCreateModal(false)}
+                disabled={actionStatus.state === "pending"}
+              >
+                Cancel
+              </button>
+              {publicKey ? (
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-full bg-[#74f89d] hover:bg-[#5df68b] text-zinc-950 text-xs font-bold font-mono shadow-sm transition"
+                  className="app-button app-button-primary"
+                  disabled={
+                    actionStatus.state === "pending" || newSide !== "long"
+                  }
                 >
-                  Publish Offer
+                  {actionStatus.state === "pending"
+                    ? "Preparing offer…"
+                    : "Publish on Testnet"}
+                  <ArrowRight size={14} />
                 </button>
-              </div>
-            </form>
-          </div>
-        </div>
+              ) : (
+                <button
+                  type="button"
+                  className="app-button app-button-primary"
+                  onClick={() => {
+                    setShowCreateModal(false);
+                    setVisible(true);
+                  }}
+                >
+                  <Wallet size={15} />
+                  Connect wallet
+                </button>
+              )}
+            </div>
+          </form>
+        </AppDialog>
       )}
     </div>
   );

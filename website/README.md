@@ -18,7 +18,9 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+This project uses `next/font` to load Plus Jakarta Sans for consistent UI typography. JetBrains Mono is available for code through the shared Tailwind font tokens.
+
+The homepage (`/`) is the public landing page. The trading workspace has dedicated routes: `/simulator`, `/marketplace`, `/contract-flow`, `/rates`, and `/protocol`. The shared workspace layout preserves wallet, theme, and historical dataset state as users navigate between these pages.
 
 ## Learn More
 

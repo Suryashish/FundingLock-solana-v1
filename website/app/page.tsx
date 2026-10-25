@@ -1,124 +1,385 @@
-"use client";
+import Link from "next/link";
+import "./hero.css";
+import { HeroFundingVisual } from "../components/HeroFundingVisual";
+import { LandingProductPreview } from "../components/LandingProductPreview";
+import {
+  ArrowDown,
+  ArrowRight,
+  ArrowUpRight,
+  ChartNoAxesCombined,
+  ChevronDown,
+  LockKeyhole,
+  Menu,
+  MoveRight,
+  ShieldCheck,
+  SlidersHorizontal,
+  Waves,
+} from "lucide-react";
 
-import React, { useState, useEffect } from "react";
-import dynamic from "next/dynamic";
-import { SideNavbar, NavTab } from "../components/SideNavbar.tsx";
-import { LandingOverview } from "../components/LandingOverview.tsx";
-import { HistoricalDashboard } from "../components/HistoricalDashboard.tsx";
-import { HedgeSimulator } from "../components/HedgeSimulator.tsx";
-import { MarketplaceBoard } from "../components/MarketplaceBoard.tsx";
-import { ReplayDemo } from "../components/ReplayDemo.tsx";
-import { FundingObservation } from "../lib/domain/types.ts";
-import { PROGRAM_ID } from "../lib/solana/client.ts";
+const appLinks = [
+  { href: "/simulator", label: "Simulator" },
+  { href: "/marketplace", label: "Marketplace" },
+  { href: "/protocol", label: "Protocol guide" },
+];
 
-const WalletContextProvider = dynamic(
-  () =>
-    import("../components/WalletContextProvider.tsx").then(
-      (mod) => mod.WalletContextProvider
-    ),
-  { ssr: false }
-);
+function Brand() {
+  return (
+    <Link href="/" className="landing-brand" aria-label="FundingLock home">
+      <span className="landing-brand-icon">
+        <LockKeyhole size={18} strokeWidth={2.3} />
+      </span>
+      fundinglock<span className="brand-period">.</span>
+    </Link>
+  );
+}
+
+const faqs = [
+  [
+    "What exactly am I hedging?",
+    "FundingLock hedges the funding-rate payments on a perpetual futures position. You agree on a fixed rate with a counterparty, and the contract settles the difference against observed funding. Your underlying position stays on your exchange; price risk remains with that position.",
+  ],
+  [
+    "Do I need to connect a wallet to try it?",
+    "No. You can use the simulator, explore example scenarios, and read the protocol guide without a wallet. Connect a compatible Solana wallet when you want to interact with the Testnet contract.",
+  ],
+  [
+    "How does collateral work?",
+    "Both counterparties post collateral calculated from the contract’s permitted funding-rate bounds, with a buffer. The protocol guide explains the collateral model, settlement rules, and limitations. The current implementation uses SOL collateral on Solana Testnet.",
+  ],
+  [
+    "Is FundingLock available on mainnet?",
+    "FundingLock is currently a Testnet application for exploration and testing. Simulations use example or historical datasets, and Testnet transactions use Testnet SOL.",
+  ],
+];
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<NavTab>("simulator");
-  const [customObservations, setCustomObservations] = useState<FundingObservation[] | null>(null);
-  const [isDark, setIsDark] = useState<boolean>(true);
-  const isDashboard = activeTab !== "overview";
-
-  // Sync theme with document element
-  useEffect(() => {
-    if (isDark) {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
-  }, [isDark]);
-
-  const handleSimulateHistorical = (observations: FundingObservation[]) => {
-    setCustomObservations(observations);
-    setActiveTab("simulator");
-  };
-
-  const handleAcceptOfferFromBoard = () => {
-    setActiveTab("replay");
-  };
-
   return (
-    <WalletContextProvider>
-      <div
-        className={`min-h-screen flex flex-col lg:flex-row font-sans transition-colors duration-200 ${
-          isDashboard ? "dashboard-shell" : "bg-[var(--bg-app)]"
-        }`}
-      >
-        {/* Left Side Navigation (Desktop Sticky Sidebar + Mobile Drawer) */}
-        <SideNavbar
-          activeTab={activeTab}
-          onSelectTab={(tab) => {
-            if (tab !== "simulator") {
-              setCustomObservations(null);
-            }
-            setActiveTab(tab);
-          }}
-          isDark={isDark}
-          onToggleTheme={() => setIsDark(!isDark)}
-        />
-
-        {/* Right Main Viewport */}
-        <div className="flex-1 flex flex-col min-w-0">
-          <main
-            className={`flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 ${
-              isDashboard ? "dashboard-main" : ""
-            }`}
+    <div className="landing">
+      <header className="landing-header">
+        <div className="landing-nav-wrap">
+          <Brand />
+          <nav className="landing-nav" aria-label="Main navigation">
+            <a href="#how-it-works">How it works</a>
+            <a href="#why-fundinglock">Why FundingLock</a>
+            <Link href="/protocol">
+              Resources <ArrowUpRight size={13} />
+            </Link>
+          </nav>
+          <Link
+            href="/simulator"
+            className="landing-button landing-button-small"
           >
-            {activeTab === "simulator" && (
-              <HedgeSimulator
-                customObservations={customObservations}
-                onNavigateTab={(tab) => setActiveTab(tab)}
-              />
-            )}
+            Launch app <ArrowUpRight size={15} />
+          </Link>
+          <details className="landing-mobile-menu">
+            <summary aria-label="Open navigation">
+              <Menu size={21} />
+            </summary>
+            <nav aria-label="Mobile navigation">
+              <a href="#how-it-works">How it works</a>
+              <a href="#why-fundinglock">Why FundingLock</a>
+              {appLinks.map((link) => (
+                <Link key={link.href} href={link.href}>
+                  {link.label}
+                </Link>
+              ))}
+            </nav>
+          </details>
+        </div>
+      </header>
 
-            {activeTab === "historical" && (
-              <HistoricalDashboard onSimulateHistorical={handleSimulateHistorical} />
-            )}
-
-            {activeTab === "marketplace" && (
-              <MarketplaceBoard onAcceptOfferClick={handleAcceptOfferFromBoard} />
-            )}
-
-            {activeTab === "replay" && (
-              <ReplayDemo />
-            )}
-
-            {activeTab === "overview" && (
-              <LandingOverview onNavigate={(tab) => setActiveTab(tab)} />
-            )}
-          </main>
-
-          {/* Institutional Minimalist Monochromatic Footer */}
-          <footer className="border-t border-black/[0.05] dark:border-white/[0.08] py-5 text-xs text-zinc-500 font-mono dashboard-footer mt-auto">
-            <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px]">
-              <div className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <span>FundingLock Protocol v1.0 • Fixed Funding Rate Risk Offset</span>
+      <main>
+        <section className="landing-hero" aria-labelledby="hero-title">
+          <div className="hero-backdrop" aria-hidden="true" />
+          <div className="hero-layout">
+            <div className="hero-copy">
+              <div className="hero-availability">
+                <span className="hero-availability-dot" />
+                FUNDING-RATE HEDGES ON SOLANA
+                <span className="hero-availability-tag">TESTNET</span>
               </div>
-              <div className="flex items-center gap-4 text-zinc-500 dark:text-zinc-400">
-                <a
-                  href={`https://explorer.solana.com/address/${PROGRAM_ID.toBase58()}?cluster=testnet`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hover:text-zinc-950 dark:hover:text-white transition"
+              <h1 id="hero-title">
+                Your funding.
+                <br />
+                <span>On your terms.</span>
+              </h1>
+              <p className="hero-description">
+                Turn unpredictable perpetual funding into a fixed rate. Keep
+                your position. Take control of the cost.
+              </p>
+              <div className="hero-actions">
+                <Link
+                  href="/simulator"
+                  className="landing-button hero-primary-action"
                 >
-                  Solana Contract
+                  Explore the simulator <ArrowUpRight size={17} />
+                </Link>
+                <a href="#how-it-works" className="hero-secondary-action">
+                  How it works <ArrowDown size={15} />
                 </a>
-                <span>•</span>
-                <span>Binance SOL-PERP</span>
-                <span>•</span>
-                <span>Solana Testnet</span>
+              </div>
+              <div className="hero-reassurance">
+                <ShieldCheck size={14} />
+                <span>No wallet needed to explore.</span>
+                <span className="hero-reassurance-divider" />
+                <span>Your position stays yours.</span>
               </div>
             </div>
-          </footer>
+            <HeroFundingVisual />
+          </div>
+          <div className="hero-principles">
+            <span className="hero-principles-label">ONE LESS VARIABLE.</span>
+            <div>
+              <span>
+                <i>01</i>Choose your fixed rate
+              </span>
+              <span>
+                <i>02</i>Keep your exchange position
+              </span>
+              <span>
+                <i>03</i>Settle the difference on-chain
+              </span>
+            </div>
+            <a href="#how-it-works" aria-label="Discover how FundingLock works">
+              <ArrowDown size={16} />
+            </a>
+          </div>
+        </section>
+
+        <LandingProductPreview />
+
+        <section
+          id="why-fundinglock"
+          className="landing-features landing-section"
+        >
+          <div className="landing-section-heading">
+            <div>
+              <span className="landing-eyebrow">
+                <span />
+                THE EDGE IS CERTAINTY
+              </span>
+              <h2>
+                Your trade. Your thesis.
+                <br />
+                <span>One less thing to watch.</span>
+              </h2>
+            </div>
+            <p>
+              You chose the position. Choose your funding too.
+              <br />A focused toolkit for the cost of staying in the market.
+            </p>
+          </div>
+          <div className="landing-feature-grid">
+            <article className="landing-feature-card">
+              <div className="feature-card-top">
+                <SlidersHorizontal size={22} />
+                <span>01 / PLAN</span>
+              </div>
+              <h3>Know your numbers.</h3>
+              <p>
+                See how changing rates affect your position. Compare a
+                fixed-rate hedge against unhedged funding across different
+                scenarios.
+              </p>
+              <div className="feature-mini-chart">
+                <div>
+                  <span>VARIABLE RATE</span>
+                  <Waves size={65} strokeWidth={1} />
+                </div>
+                <MoveRight size={19} />
+                <div>
+                  <span>FIXED RATE</span>
+                  <span className="mini-fixed">
+                    0.02<span>%</span>
+                  </span>
+                </div>
+              </div>
+              <Link href="/simulator">
+                Simulate your hedge <ArrowUpRight size={16} />
+              </Link>
+            </article>
+            <article className="landing-feature-card">
+              <div className="feature-card-top">
+                <ChartNoAxesCombined size={22} />
+                <span>02 / CONNECT</span>
+              </div>
+              <h3>Find your other side.</h3>
+              <p>
+                Explore a peer-to-peer marketplace. Set your notional and fixed
+                rate, then find a counterparty with a different view.
+              </p>
+              <div className="feature-order">
+                <div>
+                  <span className="order-avatar">L</span>
+                  <div>
+                    <strong>Long hedger</strong>
+                    <span>Seeking a fixed cost</span>
+                  </div>
+                </div>
+                <span className="order-connector">↔</span>
+                <div>
+                  <span className="order-avatar order-avatar-mint">T</span>
+                  <div>
+                    <strong>Risk taker</strong>
+                    <span>Taking the other side</span>
+                  </div>
+                </div>
+              </div>
+              <Link href="/marketplace">
+                Explore the marketplace <ArrowUpRight size={16} />
+              </Link>
+            </article>
+            <article className="landing-feature-card">
+              <div className="feature-card-top">
+                <ShieldCheck size={22} />
+                <span>03 / SETTLE</span>
+              </div>
+              <h3>Clear from the start.</h3>
+              <p>
+                Defined rate bounds. Collateral from both sides. A transparent
+                contract lifecycle you can follow on Solana.
+              </p>
+              <div className="feature-settlement">
+                <span>
+                  <span className="settlement-dot" />
+                  Collateral posted
+                </span>
+                <span>
+                  <span className="settlement-dot" />
+                  Funding observed
+                </span>
+                <span>
+                  <LockKeyhole size={13} />
+                  Difference settled
+                </span>
+              </div>
+              <Link href="/contract-flow">
+                Walk through the contract <ArrowUpRight size={16} />
+              </Link>
+            </article>
+          </div>
+        </section>
+
+        <section id="how-it-works" className="landing-process">
+          <div className="landing-section landing-process-inner">
+            <div className="process-intro">
+              <span className="landing-eyebrow">
+                <span />
+                FROM VARIABLE TO FIXED
+              </span>
+              <h2>
+                A calmer way
+                <br />
+                to stay in.
+              </h2>
+              <p>
+                Your exchange handles the trade.
+                <br />
+                FundingLock handles the funding difference.
+              </p>
+              <Link href="/protocol" className="landing-dark-button">
+                Get to know the protocol <ArrowUpRight size={16} />
+              </Link>
+              <div className="process-footnote">
+                <LockKeyhole size={14} />
+                <span>No exchange API keys. No position transfers.</span>
+              </div>
+            </div>
+            <div className="process-steps">
+              {[
+                {
+                  title: "Set your terms.",
+                  text: "Choose your position size and a fixed funding rate. Preview the costs in the simulator before you commit.",
+                },
+                {
+                  title: "Match and collateralize.",
+                  text: "Create or accept an offer. Both sides deposit the collateral required by the contract’s rate bounds.",
+                },
+                {
+                  title: "Let the difference settle.",
+                  text: "Observed funding is compared with your fixed rate. The contract settles the difference between counterparties.",
+                },
+              ].map((step, i) => (
+                <article key={step.title}>
+                  <span className="process-step-number">0{i + 1}</span>
+                  <div>
+                    <h3>{step.title}</h3>
+                    <p>{step.text}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="landing-section landing-faq">
+          <div>
+            <span className="landing-eyebrow">
+              <span />A LITTLE MORE CLARITY
+            </span>
+            <h2>
+              Good questions.
+              <br />
+              <span>Clear answers.</span>
+            </h2>
+            <p>Get familiar before you get started.</p>
+            <Link href="/protocol" className="landing-text-link">
+              Read the protocol guide <ArrowUpRight size={15} />
+            </Link>
+          </div>
+          <div className="faq-items">
+            {faqs.map(([question, answer]) => (
+              <details key={question}>
+                <summary>
+                  {question}
+                  <ChevronDown size={17} />
+                </summary>
+                <p>{answer}</p>
+              </details>
+            ))}
+          </div>
+        </section>
+
+        <section className="landing-final-cta">
+          <div className="landing-status">
+            <span />
+            LESS GUESSWORK. MORE CONVICTION.
+          </div>
+          <h2>
+            Keep your edge.
+            <br />
+            <span>Lock your funding.</span>
+          </h2>
+          <Link href="/simulator" className="landing-button">
+            Find your fixed rate <ArrowUpRight size={17} />
+          </Link>
+          <p>Start with a simulation. No wallet required.</p>
+        </section>
+      </main>
+      <footer className="landing-footer">
+        <div>
+          <Brand />
+          <p>Make funding predictable.</p>
         </div>
-      </div>
-    </WalletContextProvider>
+        <nav aria-label="Footer navigation">
+          {appLinks.map((link) => (
+            <Link key={link.href} href={link.href}>
+              {link.label}
+            </Link>
+          ))}
+          <Link href="/rates">
+            Historical rates <ArrowRight size={13} />
+          </Link>
+        </nav>
+        <div className="landing-footer-bottom">
+          <span>© 2026 FundingLock</span>
+          <span>
+            <i />
+            Solana Testnet · Built for exploration
+          </span>
+          <span>Variable markets. Fixed perspective.</span>
+        </div>
+      </footer>
+    </div>
   );
 }
